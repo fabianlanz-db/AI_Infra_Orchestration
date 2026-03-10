@@ -16,7 +16,7 @@ class VectorSearchClient:
     def __init__(self, index_name: str | None = None) -> None:
         self.workspace = WorkspaceClient()
         self.index_name = index_name or os.environ.get(
-            "VS_INDEX_NAME", "fl_demos.ai_infra_orchestration_demo.ai_kb_index"
+            "VS_INDEX_NAME", "fl_demos.asml_external_agent_demo.asml_kb_index"
         )
 
     def retrieve(self, query_text: str, top_k: int = 5) -> RetrievalResult:

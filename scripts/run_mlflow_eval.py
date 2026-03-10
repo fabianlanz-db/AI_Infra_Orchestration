@@ -37,7 +37,7 @@ def build_predict_fn(fm_client: FmAgentClient, vs_client: VectorSearchClient):
 
 
 def main() -> None:
-    experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Shared/ai-infra-orchestration-demo")
+    experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Shared/asml-fm-agent-demo")
     configure_tracing(experiment_name=experiment_name, trace_destination=os.environ.get("MLFLOW_TRACING_DESTINATION"))
 
     dataset_path = Path("scripts/eval_dataset.json")

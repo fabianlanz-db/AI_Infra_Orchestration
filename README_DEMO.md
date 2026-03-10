@@ -4,10 +4,10 @@ This repo demonstrates an FM-endpoint-first architecture and reusable framework 
 
 ## Resources Created
 
-- Catalog/Schema: `fl_demos.ai_infra_orchestration_demo`
-- Vector endpoint: `ai_infra_orchestration_vs_ep`
-- Vector index: `fl_demos.ai_infra_orchestration_demo.ai_kb_index`
-- Lakebase Autoscale project: `projects/ai-infra-orchestration-db`
+- Catalog/Schema: `fl_demos.asml_external_agent_demo`
+- Vector endpoint: `asml_external_agent_vs_ep`
+- Vector index: `fl_demos.asml_external_agent_demo.asml_kb_index`
+- Lakebase Autoscale project: `projects/asml-external-agent-db`
 
 ## Reusable Framework Modules
 
@@ -34,7 +34,7 @@ uv run streamlit run app.py
 
 ```bash
 export DATABRICKS_CONFIG_PROFILE=azure-demo
-export APP_NAME=ai-infra-showcase
+export APP_NAME=asml-external-agent-showcase
 export WS_SRC=/Workspace/Users/fabian.lanz@databricks.com/ai_infra_showcase_app
 
 databricks workspace import-dir "./apps/ai_infra_showcase_app" "$WS_SRC" --overwrite -p "$DATABRICKS_CONFIG_PROFILE"

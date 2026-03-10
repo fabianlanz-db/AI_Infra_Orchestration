@@ -21,7 +21,7 @@ class LakebaseMemoryStore:
         self.workspace = WorkspaceClient()
         self.endpoint_resource = os.environ.get(
             "LAKEBASE_ENDPOINT_RESOURCE",
-            "projects/ai-infra-orchestration-db/branches/production/endpoints/primary",
+            "projects/asml-external-agent-db/branches/production/endpoints/primary",
         )
         self.host = os.environ.get(
             "LAKEBASE_HOST",

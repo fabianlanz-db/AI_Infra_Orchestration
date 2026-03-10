@@ -6,12 +6,12 @@ env:
   - name: FM_ENDPOINT_NAME
     value: "databricks-meta-llama-3-3-70b-instruct"
   - name: VS_INDEX_NAME
-    value: "fl_demos.ai_infra_orchestration_demo.ai_kb_index"
+    value: "fl_demos.asml_external_agent_demo.asml_kb_index"
   - name: LAKEBASE_ENDPOINT_RESOURCE
-    value: "projects/ai-infra-orchestration-db/branches/production/endpoints/primary"
+    value: "projects/asml-external-agent-db/branches/production/endpoints/primary"
   - name: LAKEBASE_HOST
     value: "ep-snowy-dawn-e1ff033t.database.eastus2.azuredatabricks.net"
   - name: LAKEBASE_DB_NAME
     value: "databricks_postgres"
   - name: MLFLOW_EXPERIMENT_NAME
-    value: "/Shared/ai-infra-orchestration-demo"
+    value: "/Shared/asml-fm-agent-demo"

@@ -7,13 +7,13 @@ from databricks.sdk import WorkspaceClient
 
 
 CATALOG = "fl_demos"
-SCHEMA = "ai_infra_orchestration_demo"
+SCHEMA = "asml_external_agent_demo"
 
 
 SQL_CONTENT = f"""
 CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA};
 
-CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.ai_maintenance_events USING DELTA AS
+CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.asml_maintenance_events USING DELTA AS
 SELECT
   concat('EVT-', lpad(cast(id + 1 as string), 7, '0')) AS event_id,
   concat('ASSET-', lpad(cast(cast(rand() * 500 as int) + 1 as string), 6, '0')) AS asset_id,
@@ -24,7 +24,7 @@ SELECT
   concat('Synthetic event ', cast(id as string), ' generated for AI infrastructure demo.') AS event_summary
 FROM range(3000);
 
-CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.ai_parts_inventory USING DELTA AS
+CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.asml_parts_inventory USING DELTA AS
 SELECT
   concat('PART-', lpad(cast(id + 1 as string), 6, '0')) AS part_id,
   element_at(array('Optics','VacuumSystem','LaserSubsystem','WaferHandling','ThermalControl'), cast(rand() * 5 as int) + 1) AS subsystem,
@@ -56,8 +56,8 @@ def main() -> None:
         cur.execute(
             f"""
             SELECT
-              (SELECT count(*) FROM {CATALOG}.{SCHEMA}.ai_maintenance_events) AS maintenance_events,
-              (SELECT count(*) FROM {CATALOG}.{SCHEMA}.ai_parts_inventory) AS parts_inventory
+              (SELECT count(*) FROM {CATALOG}.{SCHEMA}.asml_maintenance_events) AS maintenance_events,
+              (SELECT count(*) FROM {CATALOG}.{SCHEMA}.asml_parts_inventory) AS parts_inventory
             """
         )
         print(cur.fetchall())
