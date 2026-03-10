@@ -21,7 +21,7 @@ flowchart LR
 ```
 
 ### Key message bullets
-- Agent runtime is Databricks FM endpoint (no ngrok dependency).
+- Agent runtime is Databricks FM endpoint.
 - Databricks provides governed retrieval (Vector Search) and operational state (Lakebase).
 - Databricks App gives enterprise-ready UI, tracing, and evaluation hooks.
 
