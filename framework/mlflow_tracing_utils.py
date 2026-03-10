@@ -45,3 +45,15 @@ def build_trace_context_headers(trace_id: str) -> dict[str, str]:
     local telemetry, then map records back to MLflow trace IDs.
     """
     return {"x-mlflow-trace-id": trace_id}
+
+
+def extract_trace_context_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """
+    Normalize inbound/outbound tracing headers for external services.
+
+    External APIs can use this helper to read and forward trace correlation IDs.
+    """
+    if not headers:
+        return {}
+    trace_id = headers.get("x-mlflow-trace-id", "")
+    return {"x-mlflow-trace-id": trace_id} if trace_id else {}

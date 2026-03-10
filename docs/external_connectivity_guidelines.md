@@ -68,3 +68,73 @@ This guide defines repeatable patterns for customer-managed external agents and 
 - [ ] Lakebase token refresh + retry logic implemented.
 - [ ] MLflow tracing enabled and validated.
 - [ ] Evaluation baseline stored and comparable across releases.
+
+## 8) Framework Hooks for External Model APIs
+
+Use these framework hooks to connect a non-Databricks model backend while
+continuing to use Databricks retrieval, memory, and tracing:
+
+- `framework/fm_agent_utils.py`
+  - Implement `ExternalModelClient` (adapter interface).
+  - Call `generate_with_external_client(...)` for provider-neutral generation.
+- `framework/vector_search_utils.py`
+  - Use `build_external_retrieval_payload(...)` to build a stable payload
+    (`rows`, `context_block`, latency) for external model requests.
+- `framework/lakebase_utils.py`
+  - Use `write_exchange(...)` to persist user + assistant turn atomically.
+  - Use `build_external_memory_payload(...)` to feed conversation history.
+- `framework/mlflow_tracing_utils.py`
+  - Use `build_trace_context_headers(...)` and
+    `extract_trace_context_headers(...)` to propagate correlation IDs.
+- `framework/external_model_hooks.py`
+  - Use `run_external_agent_turn(...)` as end-to-end reference orchestration.
+- `framework/openapi_model_adapter.py`
+  - Use `OpenApiModelClient` for generic OpenAPI/HTTP model endpoints.
+  - Configure `response_text_path` (for example `choices.0.message.content`)
+    to map provider-specific response schemas.
+
+### Minimal external adapter skeleton
+
+```python
+import time
+from framework.fm_agent_utils import ExternalModelClient, ExternalModelRequest, FmResponse
+
+class MyExternalApiClient(ExternalModelClient):
+    def generate(self, request: ExternalModelRequest) -> FmResponse:
+        start = time.perf_counter()
+        # call your external HTTP/gRPC model API here
+        text = "model output"
+        return FmResponse(
+            text=text,
+            latency_ms=int((time.perf_counter() - start) * 1000),
+            model="my-external-model",
+        )
+
+    def health(self) -> tuple[bool, str]:
+        return True, "External model API reachable"
+```
+
+### OpenAPI adapter example (drop-in)
+
+```python
+from framework.external_model_hooks import run_external_agent_turn
+from framework.openapi_model_adapter import OpenApiModelClient, OpenApiModelConfig
+
+external_model = OpenApiModelClient(
+    OpenApiModelConfig(
+        inference_url="https://my-model.company.com/v1/chat/completions",
+        headers={"Authorization": "Bearer <token>"},
+        default_model="my-company-model",
+        response_text_path="choices.0.message.content",
+        health_url="https://my-model.company.com/health",
+    )
+)
+
+result = run_external_agent_turn(
+    query="How do we triage critical instability alerts?",
+    session_id="sess-123",
+    external_model_client=external_model,
+    top_k=5,
+)
+print(result.response.text)
+```

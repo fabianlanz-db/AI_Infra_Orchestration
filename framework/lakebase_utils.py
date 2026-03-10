@@ -106,3 +106,40 @@ class LakebaseMemoryStore:
             return True, "Lakebase endpoint reachable"
         except Exception as exc:  # pragma: no cover - runtime integration
             return False, f"Lakebase error: {exc}"
+
+    def write_exchange(
+        self,
+        session_id: str,
+        user_message: str,
+        assistant_message: str,
+        assistant_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, MemoryWriteResult]:
+        """
+        Convenience hook for external APIs to persist one full turn.
+
+        Writes user message first, then assistant output.
+        """
+        user_result = self.write(
+            session_id=session_id,
+            role="user",
+            content=user_message,
+            metadata={"source": "external_agent"},
+        )
+        assistant_result = self.write(
+            session_id=session_id,
+            role="assistant",
+            content=assistant_message,
+            metadata=assistant_metadata or {},
+        )
+        return {"user": user_result, "assistant": assistant_result}
+
+    def build_external_memory_payload(self, session_id: str, limit: int = 20) -> dict[str, Any]:
+        """
+        External API hook: export session memory in a stable payload shape.
+        """
+        events = self.read(session_id=session_id, limit=limit)
+        return {
+            "session_id": session_id,
+            "event_count": len(events),
+            "events": events,
+        }
