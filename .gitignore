@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+.databricks-resources.json
+.cursor/
+.ai-dev-kit/
