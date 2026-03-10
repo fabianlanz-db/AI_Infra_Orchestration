@@ -1,7 +1,6 @@
 import os
 import time
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
 
 from databricks.sdk import WorkspaceClient
 
@@ -11,32 +10,6 @@ class FmResponse:
     text: str
     latency_ms: int
     model: str
-
-
-@dataclass
-class ExternalModelRequest:
-    """Provider-neutral request payload for external model APIs."""
-
-    system_prompt: str
-    user_prompt: str
-    temperature: float = 0.2
-
-
-@runtime_checkable
-class ExternalModelClient(Protocol):
-    """
-    Adapter contract for model APIs running outside Databricks.
-
-    Implement this in your external agent runtime and pass it to
-    `generate_with_external_client()`. This keeps retrieval/memory/tracing
-    utilities unchanged while swapping model inference backend.
-    """
-
-    def generate(self, request: ExternalModelRequest) -> FmResponse:
-        """Execute one model generation request."""
-
-    def health(self) -> tuple[bool, str]:
-        """Return backend health tuple `(ok, message)`."""
 
 
 class FmAgentClient:
@@ -73,25 +46,3 @@ class FmAgentClient:
             return True, "FM endpoint reachable"
         except Exception as exc:  # pragma: no cover - runtime integration
             return False, f"FM endpoint error: {exc}"
-
-
-def generate_with_external_client(
-    client: ExternalModelClient,
-    system_prompt: str,
-    user_prompt: str,
-    temperature: float = 0.2,
-) -> FmResponse:
-    """
-    External-model hook: call any non-Databricks model API via adapter.
-
-    Usage:
-    1) Implement `ExternalModelClient` around your external API client.
-    2) Build prompts as usual from Vector Search context.
-    3) Call this function instead of `FmAgentClient.generate(...)`.
-    """
-    request = ExternalModelRequest(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        temperature=temperature,
-    )
-    return client.generate(request)

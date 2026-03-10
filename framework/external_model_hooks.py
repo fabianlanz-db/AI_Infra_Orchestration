@@ -14,7 +14,6 @@ It combines:
 
 This file is the canonical home for external model integration logic.
 `framework/openapi_model_adapter.py` is kept as a compatibility wrapper.
-that combines:
 """
 
 import json
@@ -24,14 +23,47 @@ import urllib.request
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
+from typing import Protocol, runtime_checkable
 
-from framework.fm_agent_utils import ExternalModelClient
-from framework.fm_agent_utils import ExternalModelRequest
 from framework.fm_agent_utils import FmResponse
-from framework.fm_agent_utils import generate_with_external_client
 from framework.lakebase_utils import LakebaseMemoryStore
 from framework.mlflow_tracing_utils import build_trace_context_headers
 from framework.vector_search_utils import VectorSearchClient, build_external_retrieval_payload
+
+
+@dataclass
+class ExternalModelRequest:
+    """Provider-neutral request payload for external model APIs."""
+
+    system_prompt: str
+    user_prompt: str
+    temperature: float = 0.2
+
+
+@runtime_checkable
+class ExternalModelClient(Protocol):
+    """Adapter contract for model APIs running outside Databricks."""
+
+    def generate(self, request: ExternalModelRequest) -> FmResponse:
+        """Execute one model generation request."""
+
+    def health(self) -> tuple[bool, str]:
+        """Return backend health tuple `(ok, message)`."""
+
+
+def generate_with_external_client(
+    client: ExternalModelClient,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.2,
+) -> FmResponse:
+    """External-model hook for provider-neutral generation."""
+    request = ExternalModelRequest(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+    )
+    return client.generate(request)
 
 
 @dataclass

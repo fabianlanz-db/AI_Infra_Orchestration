@@ -82,9 +82,6 @@ continuing to use Databricks retrieval, memory, and tracing:
   - end-to-end orchestration (`run_external_agent_turn(...)`)
 - `framework/openapi_model_adapter.py` is a compatibility import shim only.
 
-- `framework/fm_agent_utils.py`
-  - Implement `ExternalModelClient` (adapter interface).
-  - Call `generate_with_external_client(...)` for provider-neutral generation.
 - `framework/vector_search_utils.py`
   - Use `build_external_retrieval_payload(...)` to build a stable payload
     (`rows`, `context_block`, latency) for external model requests.
@@ -95,6 +92,8 @@ continuing to use Databricks retrieval, memory, and tracing:
   - Use `build_trace_context_headers(...)` and
     `extract_trace_context_headers(...)` to propagate correlation IDs.
 - `framework/external_model_hooks.py`
+  - Implement `ExternalModelClient` (adapter interface).
+  - Call `generate_with_external_client(...)` for provider-neutral generation.
   - Use `OpenApiModelClient` for generic OpenAPI/HTTP model endpoints.
   - Configure `response_text_path` (for example `choices.0.message.content`)
     to map provider-specific response schemas.
@@ -104,7 +103,8 @@ continuing to use Databricks retrieval, memory, and tracing:
 
 ```python
 import time
-from framework.fm_agent_utils import ExternalModelClient, ExternalModelRequest, FmResponse
+from framework.external_model_hooks import ExternalModelClient, ExternalModelRequest
+from framework.fm_agent_utils import FmResponse
 
 class MyExternalApiClient(ExternalModelClient):
     def generate(self, request: ExternalModelRequest) -> FmResponse:
