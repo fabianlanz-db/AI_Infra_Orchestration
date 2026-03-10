@@ -74,6 +74,14 @@ This guide defines repeatable patterns for customer-managed external agents and 
 Use these framework hooks to connect a non-Databricks model backend while
 continuing to use Databricks retrieval, memory, and tracing:
 
+### Module responsibilities (consolidated)
+
+- `framework/external_model_hooks.py` is the canonical external integration module:
+  - external-model adapter contract usage
+  - OpenAPI/HTTP adapter implementation (`OpenApiModelClient`)
+  - end-to-end orchestration (`run_external_agent_turn(...)`)
+- `framework/openapi_model_adapter.py` is a compatibility import shim only.
+
 - `framework/fm_agent_utils.py`
   - Implement `ExternalModelClient` (adapter interface).
   - Call `generate_with_external_client(...)` for provider-neutral generation.
@@ -87,11 +95,10 @@ continuing to use Databricks retrieval, memory, and tracing:
   - Use `build_trace_context_headers(...)` and
     `extract_trace_context_headers(...)` to propagate correlation IDs.
 - `framework/external_model_hooks.py`
-  - Use `run_external_agent_turn(...)` as end-to-end reference orchestration.
-- `framework/openapi_model_adapter.py`
   - Use `OpenApiModelClient` for generic OpenAPI/HTTP model endpoints.
   - Configure `response_text_path` (for example `choices.0.message.content`)
     to map provider-specific response schemas.
+  - Use `run_external_agent_turn(...)` as end-to-end reference orchestration.
 
 ### Minimal external adapter skeleton
 
@@ -117,8 +124,7 @@ class MyExternalApiClient(ExternalModelClient):
 ### OpenAPI adapter example (drop-in)
 
 ```python
-from framework.external_model_hooks import run_external_agent_turn
-from framework.openapi_model_adapter import OpenApiModelClient, OpenApiModelConfig
+from framework.external_model_hooks import OpenApiModelClient, OpenApiModelConfig, run_external_agent_turn
 
 external_model = OpenApiModelClient(
     OpenApiModelConfig(

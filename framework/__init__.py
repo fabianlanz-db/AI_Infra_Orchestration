@@ -1,1 +1,1 @@
-"""Reusable customer framework utilities for FM, VS, Lakebase, tracing, external model hooks, and OpenAPI adapters."""
+"""Reusable framework utilities for FM, VS, Lakebase, tracing, and consolidated external model integration hooks."""
