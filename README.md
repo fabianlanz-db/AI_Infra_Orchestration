@@ -56,7 +56,7 @@ The design supports multiple agent implementations while keeping the backend sta
 
 ## Repository Structure
 
-- `apps/asml_showcase_app/` - Streamlit Databricks App reference implementation
+- `apps/ai_infra_showcase_app/` - Streamlit Databricks App reference implementation
 - `framework/` - reusable integration utilities:
   - `fm_agent_utils.py`
   - `vector_search_utils.py`
@@ -64,14 +64,14 @@ The design supports multiple agent implementations while keeping the backend sta
   - `mlflow_tracing_utils.py`
 - `scripts/` - bootstrap, synthetic data generation, and evaluation scripts
 - `docs/external_connectivity_guidelines.md` - production connectivity guidance
-- `README_ASML_DEMO.md` - ASML-specific demo runbook
+- `README_DEMO.md` - demo runbook with deployment steps
 
 ## Quick Start
 
 ### Local app run
 
 ```bash
-cd apps/asml_showcase_app
+cd apps/ai_infra_showcase_app
 uv pip install -r requirements.txt
 uv run streamlit run app.py
 ```
@@ -79,7 +79,7 @@ uv run streamlit run app.py
 ### Resource bootstrap
 
 ```bash
-uv run python scripts/bootstrap_asml_resources.py
+uv run python scripts/bootstrap_ai_infra_resources.py
 ```
 
 ### Evaluation

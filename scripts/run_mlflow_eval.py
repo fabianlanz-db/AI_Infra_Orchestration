@@ -26,7 +26,7 @@ def build_predict_fn(fm_client: FmAgentClient, vs_client: VectorSearchClient):
         context = "\n\n".join([str(row[6]) for row in retrieval.rows[:5]]) if retrieval.rows else "No context."
         response = fm_client.generate(
             system_prompt=(
-                "You are an ASML operations assistant. Use only retrieved context and be concise."
+                "You are an industrial operations assistant. Use only retrieved context and be concise."
             ),
             user_prompt=f"Question: {query}\n\nRetrieved context:\n{context}",
             temperature=0.2,
@@ -37,7 +37,7 @@ def build_predict_fn(fm_client: FmAgentClient, vs_client: VectorSearchClient):
 
 
 def main() -> None:
-    experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Shared/asml-fm-agent-demo")
+    experiment_name = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Shared/ai-infra-orchestration-demo")
     configure_tracing(experiment_name=experiment_name, trace_destination=os.environ.get("MLFLOW_TRACING_DESTINATION"))
 
     dataset_path = Path("scripts/eval_dataset.json")

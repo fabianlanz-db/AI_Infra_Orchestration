@@ -11,10 +11,10 @@ from framework.lakebase_utils import LakebaseMemoryStore
 from framework.mlflow_tracing_utils import configure_tracing, traced, verify_traces
 from framework.vector_search_utils import VectorSearchClient
 
-st.set_page_config(page_title="ASML FM Agent + Lakebase + Vector Search", layout="wide")
-st.title("ASML Agent Framework (FM Endpoint First)")
+st.set_page_config(page_title="AI Infra FM Agent + Lakebase + Vector Search", layout="wide")
+st.title("AI Infra Agent Framework (FM Endpoint First)")
 
-mlflow_experiment = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Shared/asml-fm-agent-demo")
+mlflow_experiment = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Shared/ai-infra-orchestration-demo")
 configure_tracing(
     experiment_name=mlflow_experiment,
     trace_destination=os.environ.get("MLFLOW_TRACING_DESTINATION"),
@@ -30,12 +30,12 @@ if "request_latencies" not in st.session_state:
     st.session_state.request_latencies = []
 
 
-@traced(name="asml_retrieve_context", span_type="RETRIEVER")
+@traced(name="ai_infra_retrieve_context", span_type="RETRIEVER")
 def retrieve_context(query: str, top_k: int):
     return vs_client.retrieve(query, top_k=top_k)
 
 
-@traced(name="asml_fm_generate", span_type="CHAT_MODEL")
+@traced(name="ai_infra_fm_generate", span_type="CHAT_MODEL")
 def generate_answer(query: str, context_rows: list[list], top_k: int):
     context_block = "\n\n".join(
         [
@@ -48,7 +48,7 @@ def generate_answer(query: str, context_rows: list[list], top_k: int):
         ]
     )
     system_prompt = (
-        "You are an ASML operations assistant. Use only provided retrieved context. "
+        "You are an industrial operations assistant. Use only provided retrieved context. "
         "If context is insufficient, say so clearly. Keep response concise and actionable."
     )
     user_prompt = (
@@ -58,12 +58,12 @@ def generate_answer(query: str, context_rows: list[list], top_k: int):
     return fm_client.generate(system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.2)
 
 
-@traced(name="asml_memory_write", span_type="TOOL")
+@traced(name="ai_infra_memory_write", span_type="TOOL")
 def write_memory(session_id: str, role: str, content: str, metadata: dict):
     return memory_store.write(session_id=session_id, role=role, content=content, metadata=metadata)
 
 
-@traced(name="asml_memory_read", span_type="TOOL")
+@traced(name="ai_infra_memory_read", span_type="TOOL")
 def read_memory(session_id: str, limit: int):
     return memory_store.read(session_id=session_id, limit=limit)
 

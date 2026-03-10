@@ -1,4 +1,4 @@
-# ASML Demo Day Package
+# AI Infra Orchestration Demo Day Package
 
 ## 1) One-Slide Architecture
 
@@ -11,12 +11,12 @@ Databricks FM Agent + Lakebase + Vector Search
 
 ```mermaid
 flowchart LR
-  User[ASML User] --> AppUI[Databricks App UI]
+  User[Business User] --> AppUI[Databricks App UI]
   AppUI -->|chat.completions| FmEndpoint[Databricks FM Endpoint]
   AppUI -->|query_index| VectorSearch[Databricks Vector Search]
   AppUI -->|postgres oauth token| Lakebase[Lakebase Autoscaling]
   AppUI -->|trace spans| Mlflow[MLflow Tracing]
-  VectorSearch --> DeltaTables[UC Tables fl_demos.asml_external_agent_demo]
+  VectorSearch --> DeltaTables[UC Tables fl_demos.ai_infra_orchestration_demo]
   Lakebase --> SessionState[Session Memory and Chat State]
 ```
 
@@ -37,7 +37,7 @@ flowchart LR
 "Here we show retrieved evidence, latency metrics, persisted session memory, and MLflow trace verification. This demonstrates a reusable customer framework with measurable quality."
 
 ### 2:20 - 3:00 (Business outcome)
-"ASML gets a repeatable pattern for customer deployments: FM generation, governed retrieval, transactional memory, and standardized evaluation."
+"Teams get a repeatable pattern for customer deployments: FM generation, governed retrieval, transactional memory, and standardized evaluation."
 
 ## 3) FM Endpoint Fallback Plan (If dependencies degrade)
 
@@ -52,8 +52,8 @@ flowchart LR
    - `LAKEBASE_ENDPOINT_RESOURCE`
 2. Verify endpoint/index health with Databricks CLI or MCP tools.
 3. Redeploy Databricks app:
-   - `databricks workspace import-dir "./apps/asml_showcase_app" "/Workspace/Users/fabian.lanz@databricks.com/asml_showcase_app" --overwrite -p azure-demo`
-   - `databricks apps deploy asml-external-agent-showcase --source-code-path "/Workspace/Users/fabian.lanz@databricks.com/asml_showcase_app" -p azure-demo`
+   - `databricks workspace import-dir "./apps/ai_infra_showcase_app" "/Workspace/Users/fabian.lanz@databricks.com/ai_infra_showcase_app" --overwrite -p azure-demo`
+   - `databricks apps deploy ai-infra-showcase --source-code-path "/Workspace/Users/fabian.lanz@databricks.com/ai_infra_showcase_app" -p azure-demo`
 
 ## 4) Go-Live-in-5-Minutes Checklist
 
@@ -65,7 +65,7 @@ Run this before the customer joins:
 - [ ] Open app URL in browser and verify sidebar backend status is `UP`.
 - [ ] Run one warm-up chat request to prime caches.
 - [ ] Keep terminal tabs open for quick log checks:
-  - `databricks apps logs asml-external-agent-showcase --tail-lines 100 -p azure-demo`
+  - `databricks apps logs ai-infra-showcase --tail-lines 100 -p azure-demo`
 
 ## 5) Optional Q&A Answers
 
