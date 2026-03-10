@@ -7,3 +7,4 @@ __pycache__/
 .databricks-resources.json
 .cursor/
 .ai-dev-kit/
+.gh/
