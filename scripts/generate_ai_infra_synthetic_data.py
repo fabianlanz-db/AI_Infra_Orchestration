@@ -2,12 +2,14 @@
 Generate synthetic AI infrastructure demo data in Unity Catalog.
 """
 
+import os
+
 from databricks import sql
 from databricks.sdk import WorkspaceClient
 
 
-CATALOG = "fl_demos"
-SCHEMA = "asml_external_agent_demo"
+CATALOG = os.environ.get("DEMO_CATALOG", "fl_demos")
+SCHEMA = os.environ.get("DEMO_SCHEMA", "asml_external_agent_demo")
 
 
 SQL_CONTENT = f"""
@@ -40,7 +42,11 @@ FROM range(1200);
 def main() -> None:
     workspace = WorkspaceClient()
     warehouses = list(workspace.warehouses.list())
-    running = [w for w in warehouses if str(w.state) == "RUNNING"]
+    running = [
+        w
+        for w in warehouses
+        if str(getattr(w.state, "value", w.state)).upper() == "RUNNING"
+    ]
     if not running:
         raise RuntimeError("No running SQL warehouse found. Start one and rerun.")
     warehouse_id = running[0].id

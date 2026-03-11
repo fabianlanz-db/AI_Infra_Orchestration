@@ -69,6 +69,17 @@ This guide defines repeatable patterns for customer-managed external agents and 
 - [ ] MLflow tracing enabled and validated.
 - [ ] Evaluation baseline stored and comparable across releases.
 
+## 7b) MLflow Judging (Quality Gates)
+
+For demo-ready judging standards and copy/paste scorer text, see:
+- `docs/mlflow_judging_guidelines.md`
+
+Minimum recommended judges:
+- groundedness
+- operational actionability
+- safety and escalation
+- output format compliance
+
 ## 8) Framework Hooks for External Model APIs
 
 Use these framework hooks to connect a non-Databricks model backend while

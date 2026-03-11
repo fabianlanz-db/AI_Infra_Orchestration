@@ -7,19 +7,22 @@ Creates/updates:
 - Lakebase Autoscaling project
 """
 
+import os
+
 from databricks import sql
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.postgres import Project, ProjectSpec
 from databricks.sdk.service.vectorsearch import (
     DeltaSyncVectorIndexSpecRequest,
     EmbeddingSourceColumn,
+    EndpointType,
     PipelineType,
     VectorIndexType,
 )
 
 
-CATALOG = "fl_demos"
-SCHEMA = "asml_external_agent_demo"
+CATALOG = os.environ.get("DEMO_CATALOG", "fl_demos")
+SCHEMA = os.environ.get("DEMO_SCHEMA", "asml_external_agent_demo")
 VS_ENDPOINT = "asml_external_agent_vs_ep"
 VS_INDEX = f"{CATALOG}.{SCHEMA}.asml_kb_index"
 SOURCE_TABLE = f"{CATALOG}.{SCHEMA}.asml_kb_chunks"
@@ -65,9 +68,12 @@ def execute_statements(conn: sql.Connection, sql_text: str) -> None:
 
 def main() -> None:
     workspace = WorkspaceClient()
-    warehouse_id = workspace.warehouses.get_workspace_warehouse_config().data_access_config[0].key if False else None
     warehouses = list(workspace.warehouses.list())
-    running = [w for w in warehouses if str(w.state) == "RUNNING"]
+    running = [
+        w
+        for w in warehouses
+        if str(getattr(w.state, "value", w.state)).upper() == "RUNNING"
+    ]
     if not running:
         raise RuntimeError("No running SQL warehouse found. Start one and rerun.")
     selected_warehouse = running[0].id
@@ -83,7 +89,10 @@ def main() -> None:
             f"ALTER TABLE {SOURCE_TABLE} SET TBLPROPERTIES (delta.enableChangeDataFeed = true);",
         )
 
-    workspace.vector_search_endpoints.create_endpoint(name=VS_ENDPOINT, endpoint_type="STANDARD")
+    workspace.vector_search_endpoints.create_endpoint(
+        name=VS_ENDPOINT,
+        endpoint_type=EndpointType.STANDARD,
+    )
     vs_spec = DeltaSyncVectorIndexSpecRequest(
         source_table=SOURCE_TABLE,
         embedding_source_columns=[
