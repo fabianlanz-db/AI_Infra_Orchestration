@@ -13,5 +13,9 @@ env:
     value: "ep-damp-field-d2e58wc2.database.us-east-1.cloud.databricks.com"
   - name: LAKEBASE_DB_NAME
     value: "databricks_postgres"
+  - name: LAKEBASE_DB_USER
+    value: "ai_infra_app_user"
+  - name: LAKEBASE_DB_PASSWORD
+    value: "DemoLakebasePwd_2026!"
   - name: MLFLOW_EXPERIMENT_NAME
     value: "/Shared/asml-fm-agent-demo"
