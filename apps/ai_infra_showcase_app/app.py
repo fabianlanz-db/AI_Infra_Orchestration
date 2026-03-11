@@ -3,6 +3,7 @@ import statistics
 import time
 import uuid
 
+import mlflow
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -22,7 +23,12 @@ configure_tracing(
 
 fm_client = FmAgentClient()
 vs_client = VectorSearchClient()
-memory_store = LakebaseMemoryStore()
+memory_store_error = None
+try:
+    memory_store = LakebaseMemoryStore()
+except Exception as exc:  # pragma: no cover - runtime integration
+    memory_store = None
+    memory_store_error = str(exc)
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = f"sess-{uuid.uuid4().hex[:10]}"
@@ -60,23 +66,76 @@ def generate_answer(query: str, context_rows: list[list], top_k: int):
 
 @traced(name="ai_infra_memory_write", span_type="TOOL")
 def write_memory(session_id: str, role: str, content: str, metadata: dict):
+    if memory_store is None:
+        raise RuntimeError(f"Lakebase unavailable: {memory_store_error}")
     return memory_store.write(session_id=session_id, role=role, content=content, metadata=metadata)
 
 
 @traced(name="ai_infra_memory_read", span_type="TOOL")
 def read_memory(session_id: str, limit: int):
+    if memory_store is None:
+        raise RuntimeError(f"Lakebase unavailable: {memory_store_error}")
     return memory_store.read(session_id=session_id, limit=limit)
+
+
+@traced(name="ai_infra_agent_turn", span_type="CHAIN")
+def run_agent_turn(session_id: str, prompt: str, top_k: int):
+    retrieval = retrieve_context(prompt, top_k)
+    fm_response = generate_answer(prompt, retrieval.rows, top_k)
+    user_event = None
+    assistant_event = None
+    if memory_store is not None:
+        try:
+            user_event = write_memory(
+                session_id,
+                "user",
+                prompt,
+                {"source": "databricks_app"},
+            )
+            assistant_event = write_memory(
+                session_id,
+                "assistant",
+                fm_response.text,
+                {"model": fm_response.model, "top_k": top_k},
+            )
+        except Exception:
+            pass
+    return retrieval, fm_response, user_event, assistant_event
 
 
 def dependency_status():
     fm_ok, fm_msg = fm_client.health()
     vs_ok, vs_msg = vs_client.health()
-    lb_ok, lb_msg = memory_store.health()
+    if memory_store is None:
+        lb_ok, lb_msg = False, f"Lakebase unavailable: {memory_store_error}"
+        lb_endpoint = os.environ.get("LAKEBASE_ENDPOINT_RESOURCE", "not configured")
+    else:
+        lb_ok, lb_msg = memory_store.health()
+        lb_endpoint = memory_store.endpoint_resource
     return {
         "fm_endpoint": {"ok": fm_ok, "message": fm_msg, "endpoint": fm_client.endpoint_name},
         "vector_search": {"ok": vs_ok, "message": vs_msg, "index": vs_client.index_name},
-        "lakebase": {"ok": lb_ok, "message": lb_msg, "endpoint": memory_store.endpoint_resource},
+        "lakebase": {"ok": lb_ok, "message": lb_msg, "endpoint": lb_endpoint},
     }
+
+
+def mlflow_experiment_url() -> str | None:
+    host = os.environ.get("DATABRICKS_HOST")
+    workspace_id = os.environ.get("DATABRICKS_WORKSPACE_ID")
+    if not host:
+        return None
+    if not host.startswith("http://") and not host.startswith("https://"):
+        host = f"https://{host}"
+    try:
+        experiment = mlflow.get_experiment_by_name(mlflow_experiment)
+        if experiment is None:
+            return None
+        base = f"{host.rstrip('/')}/ml/experiments/{experiment.experiment_id}/traces"
+        if workspace_id:
+            return f"{base}?o={workspace_id}"
+        return base
+    except Exception:
+        return None
 
 
 with st.sidebar:
@@ -84,8 +143,13 @@ with st.sidebar:
     st.text_input("Session ID", key="session_id")
     st.markdown(f"FM endpoint: `{fm_client.endpoint_name}`")
     st.markdown(f"VS index: `{vs_client.index_name}`")
-    st.markdown(f"Lakebase endpoint: `{memory_store.endpoint_resource}`")
-    auto_refresh = st.toggle("Auto-refresh dependency status (10s)", value=True)
+    lakebase_endpoint_text = (
+        memory_store.endpoint_resource
+        if memory_store is not None
+        else os.environ.get("LAKEBASE_ENDPOINT_RESOURCE", "not configured")
+    )
+    st.markdown(f"Lakebase endpoint: `{lakebase_endpoint_text}`")
+    auto_refresh = st.toggle("Auto-refresh dependency status (10s)", value=False)
     status = dependency_status()
     all_ok = all(item["ok"] for item in status.values())
     st.metric("Dependencies", "UP" if all_ok else "DEGRADED")
@@ -119,17 +183,13 @@ with left:
     if st.button("Run Agent", type="primary"):
         start = time.perf_counter()
         with st.spinner("Retrieving + generating response..."):
-            retrieval = retrieve_context(prompt, top_k)
-            fm_response = generate_answer(prompt, retrieval.rows, top_k)
-            user_event = write_memory(
-                st.session_state.session_id, "user", prompt, {"source": "databricks_app"}
+            retrieval, fm_response, user_event, assistant_event = run_agent_turn(
+                st.session_state.session_id, prompt, top_k
             )
-            assistant_event = write_memory(
-                st.session_state.session_id,
-                "assistant",
-                fm_response.text,
-                {"model": fm_response.model, "top_k": top_k},
-            )
+            if memory_store is None:
+                st.warning(f"Lakebase memory write skipped: {memory_store_error}")
+            elif not (user_event and assistant_event):
+                st.warning("Lakebase memory write skipped due to runtime error.")
         total_latency = int((time.perf_counter() - start) * 1000)
         st.session_state.request_latencies.append(total_latency)
 
@@ -138,20 +198,32 @@ with left:
         st.metric("Vector latency (ms)", retrieval.latency_ms)
         st.metric("FM latency (ms)", fm_response.latency_ms)
         st.metric("Total latency (ms)", total_latency)
-        st.caption(f"Memory event IDs: user={user_event.event_id}, assistant={assistant_event.event_id}")
+        if user_event and assistant_event:
+            st.caption(f"Memory event IDs: user={user_event.event_id}, assistant={assistant_event.event_id}")
         st.json(retrieval.rows[:3])
 
 with right:
     st.subheader("Session Memory (Lakebase)")
     if st.button("Refresh memory"):
-        events = read_memory(st.session_state.session_id, limit=20)
-        st.write(f"Events: {len(events)}")
-        st.json(events)
+        try:
+            events = read_memory(st.session_state.session_id, limit=20)
+            st.write(f"Events: {len(events)}")
+            st.json(events)
+        except Exception as exc:
+            st.warning(f"Lakebase memory read unavailable: {exc}")
 
     st.subheader("Tracing + Metrics")
+    traces_ui_url = mlflow_experiment_url()
+    if traces_ui_url:
+        st.link_button("Open MLflow Traces UI", traces_ui_url)
     if st.button("Verify traces"):
-        trace_summary = verify_traces(max_results=20)
-        st.json(trace_summary)
+        try:
+            trace_summary = verify_traces(max_results=20)
+            st.json(trace_summary)
+        except Exception as exc:
+            st.warning(f"Trace verification from app runtime failed: {exc}")
+            if traces_ui_url:
+                st.info(f"Open traces directly in MLflow UI: {traces_ui_url}")
     if st.button("Show latency summary"):
         samples = st.session_state.request_latencies
         if not samples:
