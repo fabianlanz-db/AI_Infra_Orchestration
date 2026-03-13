@@ -15,7 +15,7 @@ from framework.vector_search_utils import VectorSearchClient
 st.set_page_config(page_title="AI Infra FM Agent + Lakebase + Vector Search", layout="wide")
 st.title("AI Infra Agent Framework (FM Endpoint First)")
 
-mlflow_experiment = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Shared/asml-fm-agent-demo")
+mlflow_experiment = os.environ.get("MLFLOW_EXPERIMENT_NAME", "/Shared/ai-infra-fm-agent-demo")
 configure_tracing(
     experiment_name=mlflow_experiment,
     trace_destination=os.environ.get("MLFLOW_TRACING_DESTINATION"),

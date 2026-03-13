@@ -22,19 +22,19 @@ from databricks.sdk.service.vectorsearch import (
 
 
 CATALOG = os.environ.get("DEMO_CATALOG", "fl_demos")
-SCHEMA = os.environ.get("DEMO_SCHEMA", "asml_external_agent_demo")
-VS_ENDPOINT = os.environ.get("DEMO_VS_ENDPOINT", "asml_external_agent_vs_ep")
-VS_INDEX_NAME = os.environ.get("DEMO_VS_INDEX_NAME", "asml_kb_index")
+SCHEMA = os.environ.get("DEMO_SCHEMA", "ai_infra_agent_demo")
+VS_ENDPOINT = os.environ.get("DEMO_VS_ENDPOINT", "ai_infra_agent_vs_ep")
+VS_INDEX_NAME = os.environ.get("DEMO_VS_INDEX_NAME", "ai_infra_kb_index")
 VS_INDEX = f"{CATALOG}.{SCHEMA}.{VS_INDEX_NAME}"
-SOURCE_TABLE = f"{CATALOG}.{SCHEMA}.asml_kb_chunks"
-LAKEBASE_PROJECT_ID = os.environ.get("DEMO_LAKEBASE_PROJECT_ID", "asml-external-agent-db")
+SOURCE_TABLE = f"{CATALOG}.{SCHEMA}.ai_infra_kb_chunks"
+LAKEBASE_PROJECT_ID = os.environ.get("DEMO_LAKEBASE_PROJECT_ID", "ai-infra-agent-db")
 LAKEBASE_DISPLAY_NAME = os.environ.get("DEMO_LAKEBASE_DISPLAY_NAME", "External Agent DB")
 
 
 DDL_AND_DATA = f"""
 CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA};
 
-CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.asml_assets USING DELTA AS
+CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.ai_infra_assets USING DELTA AS
 SELECT
   concat('ASSET-', lpad(cast(id + 1 as string), 6, '0')) AS asset_id,
   element_at(array('EUVScanner','DUVScanner','MetrologySystem','EtchModule','LithographyTrack'), cast(rand() * 5 as int) + 1) AS asset_type,
@@ -45,7 +45,7 @@ SELECT
   current_timestamp() AS ingested_at
 FROM range(500);
 
-CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.asml_kb_chunks USING DELTA AS
+CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.ai_infra_kb_chunks USING DELTA AS
 SELECT
   concat('CH-', lpad(cast(id + 1 as string), 8, '0')) AS chunk_id,
   concat('DOC-', lpad(cast(cast(rand() * 900 as int) + 1 as string), 6, '0')) AS document_id,
@@ -54,8 +54,8 @@ SELECT
   element_at(array('alignment_drift','vacuum_alert','laser_instability','cooling_warning','sensor_fault'), cast(rand() * 5 as int) + 1) AS issue_type,
   element_at(array('low','medium','high','critical'), cast(rand() * 4 as int) + 1) AS severity,
   element_at(array('Optics','WaferHandling','VacuumSystem','ThermalControl','LaserSubsystem'), cast(rand() * 5 as int) + 1) AS subsystem,
-  concat('ASML knowledge chunk ', cast(id as string), ' describing diagnostics, probable root cause, stepwise mitigation, safety constraints, and part replacement guidance for high-precision lithography operations.') AS content,
-  concat_ws(',', 'asml', 'external-agent', 'ops-demo') AS tags,
+  concat('Knowledge chunk ', cast(id as string), ' describing diagnostics, probable root cause, stepwise mitigation, safety constraints, and part replacement guidance for industrial operations.') AS content,
+  concat_ws(',', 'ai-infra', 'external-agent', 'ops-demo') AS tags,
   timestampadd(HOUR, -cast(rand() * 24 * 365 as int), current_timestamp()) AS source_ts,
   current_timestamp() AS ingested_at
 FROM range(8000);

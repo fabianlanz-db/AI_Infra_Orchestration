@@ -6,9 +6,9 @@ env:
   - name: FM_ENDPOINT_NAME
     value: "databricks-meta-llama-3-3-70b-instruct"
   - name: VS_INDEX_NAME
-    value: "serverless_stable_9gm5rx_catalog.asml_external_agent_demo.asml_kb_index"
+    value: "serverless_stable_9gm5rx_catalog.ai_infra_agent_demo.ai_infra_kb_index"
   - name: LAKEBASE_ENDPOINT_RESOURCE
-    value: "projects/asml-external-agent-db/branches/production/endpoints/primary"
+    value: "projects/ai-infra-agent-db/branches/production/endpoints/primary"
   - name: LAKEBASE_HOST
     value: "ep-damp-field-d2e58wc2.database.us-east-1.cloud.databricks.com"
   - name: LAKEBASE_DB_NAME
@@ -20,4 +20,4 @@ env:
   - name: LAKEBASE_DB_PASSWORD
     value: "REPLACE_WITH_SECRET_OR_ENV_INJECTION"
   - name: MLFLOW_EXPERIMENT_NAME
-    value: "/Shared/asml-fm-agent-demo"
+    value: "/Shared/ai-infra-fm-agent-demo"
