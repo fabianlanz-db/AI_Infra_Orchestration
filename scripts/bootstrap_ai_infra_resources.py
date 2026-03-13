@@ -1,8 +1,8 @@
 """
-Bootstrap Databricks resources using existing external-agent resource names.
+Bootstrap Databricks resources for the AI Infra Orchestration demo.
 
 Creates/updates:
-- UC schema and synthetic Delta tables in fl_demos.asml_external_agent_demo
+- UC schema and synthetic Delta tables (configurable via DEMO_CATALOG / DEMO_SCHEMA)
 - Vector Search endpoint + Delta Sync index
 - Lakebase Autoscaling project
 """
@@ -23,10 +23,12 @@ from databricks.sdk.service.vectorsearch import (
 
 CATALOG = os.environ.get("DEMO_CATALOG", "fl_demos")
 SCHEMA = os.environ.get("DEMO_SCHEMA", "asml_external_agent_demo")
-VS_ENDPOINT = "asml_external_agent_vs_ep"
-VS_INDEX = f"{CATALOG}.{SCHEMA}.asml_kb_index"
+VS_ENDPOINT = os.environ.get("DEMO_VS_ENDPOINT", "asml_external_agent_vs_ep")
+VS_INDEX_NAME = os.environ.get("DEMO_VS_INDEX_NAME", "asml_kb_index")
+VS_INDEX = f"{CATALOG}.{SCHEMA}.{VS_INDEX_NAME}"
 SOURCE_TABLE = f"{CATALOG}.{SCHEMA}.asml_kb_chunks"
-LAKEBASE_PROJECT_ID = "asml-external-agent-db"
+LAKEBASE_PROJECT_ID = os.environ.get("DEMO_LAKEBASE_PROJECT_ID", "asml-external-agent-db")
+LAKEBASE_DISPLAY_NAME = os.environ.get("DEMO_LAKEBASE_DISPLAY_NAME", "External Agent DB")
 
 
 DDL_AND_DATA = f"""
@@ -125,7 +127,7 @@ def main() -> None:
     )
 
     operation = workspace.postgres.create_project(
-        project=Project(spec=ProjectSpec(display_name="ASML External Agent DB", pg_version="17")),
+        project=Project(spec=ProjectSpec(display_name=LAKEBASE_DISPLAY_NAME, pg_version="17")),
         project_id=LAKEBASE_PROJECT_ID,
     )
     project = operation.wait()

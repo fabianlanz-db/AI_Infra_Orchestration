@@ -16,7 +16,7 @@ flowchart LR
   AppUI -->|query_index| VectorSearch[Databricks Vector Search]
   AppUI -->|postgres oauth token| Lakebase[Lakebase Autoscaling]
   AppUI -->|trace spans| Mlflow[MLflow Tracing]
-  VectorSearch --> DeltaTables[UC Tables fl_demos.asml_external_agent_demo]
+  VectorSearch --> DeltaTables[UC Tables CATALOG.SCHEMA]
   Lakebase --> SessionState[Session Memory and Chat State]
 ```
 
@@ -52,8 +52,8 @@ flowchart LR
    - `LAKEBASE_ENDPOINT_RESOURCE`
 2. Verify endpoint/index health with Databricks CLI or MCP tools.
 3. Redeploy Databricks app:
-   - `databricks workspace import-dir "./apps/ai_infra_showcase_app" "/Workspace/Users/fabian.lanz@databricks.com/ai_infra_showcase_app" --overwrite -p azure-demo`
-   - `databricks apps deploy asml-external-agent-showcase --source-code-path "/Workspace/Users/fabian.lanz@databricks.com/ai_infra_showcase_app" -p azure-demo`
+   - `databricks workspace import-dir "./apps/ai_infra_showcase_app" "$WS_SRC" --overwrite -p "$DATABRICKS_CONFIG_PROFILE"`
+   - `databricks apps deploy "$APP_NAME" --source-code-path "$WS_SRC" -p "$DATABRICKS_CONFIG_PROFILE"`
 
 ## 4) Go-Live-in-5-Minutes Checklist
 
@@ -65,7 +65,7 @@ Run this before the customer joins:
 - [ ] Open app URL in browser and verify sidebar backend status is `UP`.
 - [ ] Run one warm-up chat request to prime caches.
 - [ ] Keep terminal tabs open for quick log checks:
-  - `databricks apps logs asml-external-agent-showcase --tail-lines 100 -p azure-demo`
+  - `databricks apps logs "$APP_NAME" --tail-lines 100 -p "$DATABRICKS_CONFIG_PROFILE"`
 
 ## 5) Optional Q&A Answers
 

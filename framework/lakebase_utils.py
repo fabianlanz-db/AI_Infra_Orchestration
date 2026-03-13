@@ -20,14 +20,12 @@ class LakebaseMemoryStore:
 
     def __init__(self) -> None:
         self.workspace = WorkspaceClient()
-        self.endpoint_resource = os.environ.get(
-            "LAKEBASE_ENDPOINT_RESOURCE",
-            "projects/asml-external-agent-db/branches/production/endpoints/primary",
-        )
-        self.host = os.environ.get(
-            "LAKEBASE_HOST",
-            "ep-snowy-dawn-e1ff033t.database.eastus2.azuredatabricks.net",
-        )
+        self.endpoint_resource = os.environ.get("LAKEBASE_ENDPOINT_RESOURCE", "")
+        if not self.endpoint_resource:
+            raise ValueError("LAKEBASE_ENDPOINT_RESOURCE env var is required")
+        self.host = os.environ.get("LAKEBASE_HOST", "")
+        if not self.host:
+            raise ValueError("LAKEBASE_HOST env var is required")
         self.dbname = os.environ.get("LAKEBASE_DB_NAME", "databricks_postgres")
         self.db_password = os.environ.get("LAKEBASE_DB_PASSWORD")
         self.db_user = self._resolve_db_user()

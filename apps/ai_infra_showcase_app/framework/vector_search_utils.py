@@ -15,9 +15,9 @@ class RetrievalResult:
 class VectorSearchClient:
     def __init__(self, index_name: str | None = None) -> None:
         self.workspace = WorkspaceClient()
-        self.index_name = index_name or os.environ.get(
-            "VS_INDEX_NAME", "fl_demos.asml_external_agent_demo.asml_kb_index"
-        )
+        self.index_name = index_name or os.environ.get("VS_INDEX_NAME", "")
+        if not self.index_name:
+            raise ValueError("VS_INDEX_NAME env var or index_name parameter is required")
 
     def retrieve(self, query_text: str, top_k: int = 5) -> RetrievalResult:
         start = time.perf_counter()
