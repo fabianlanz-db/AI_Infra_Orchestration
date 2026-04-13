@@ -75,6 +75,73 @@ scorers = [
 ]
 ```
 
+## Custom Judges (framework/judge_hooks.py)
+
+The repository includes a pluggable judge framework for evaluation criteria that go beyond what built-in MLflow scorers cover.
+
+### JudgeClient Protocol
+
+Any class that implements `name` (property) and `evaluate(JudgeInput) -> JudgeVerdict` satisfies the contract:
+
+```python
+from framework.judge_hooks import JudgeClient, JudgeInput, JudgeVerdict
+
+class MyCustomJudge:
+    @property
+    def name(self) -> str:
+        return "my_custom_check"
+
+    def evaluate(self, input: JudgeInput) -> JudgeVerdict:
+        passed = "critical" not in input.response.lower()
+        return JudgeVerdict(
+            judge_name=self.name,
+            passed=passed,
+            score=1.0 if passed else 0.0,
+            rationale="Response avoids critical terminology." if passed else "Found 'critical' in response.",
+        )
+```
+
+### Reference Judges
+
+| Judge | What It Checks | Configurable |
+|-------|---------------|-------------|
+| `FormatComplianceJudge` | Response contains Summary, Recommended Actions, Risk Notes sections | Section list |
+| `LatencyThresholdJudge` | End-to-end latency stays below threshold | `threshold_ms` (default 5000) |
+| `GroundednessJudge` | Response terms overlap with retrieved context | `min_overlap_ratio` (default 0.15) |
+
+### Using Custom Judges with MLflow
+
+Wrap any judge as an MLflow scorer via `make_mlflow_scorer`, or use `build_judge_suite` to combine custom judges with built-in scorers:
+
+```python
+from framework.judge_hooks import (
+    FormatComplianceJudge,
+    LatencyThresholdJudge,
+    GroundednessJudge,
+    build_judge_suite,
+)
+
+scorers = build_judge_suite(
+    custom_judges=[
+        FormatComplianceJudge(),
+        LatencyThresholdJudge(threshold_ms=3000),
+        GroundednessJudge(),
+    ],
+    fm_endpoint="databricks-meta-llama-3-3-70b-instruct",
+)
+
+results = mlflow.genai.evaluate(data=dataset, predict_fn=predict_fn, scorers=scorers)
+```
+
+### Assessment Runner
+
+For a full assessment with all judges and a richer dataset:
+
+```bash
+python scripts/build_assessment_dataset.py   # generate 7-case dataset
+python scripts/run_assessment.py             # run all judges + built-in scorers
+```
+
 ## Demo Talk Track (30 seconds)
 
-"We use MLflow judges to score each response against business rules: groundedness, actionability, and safety. This lets us track quality over time and gate regressions before production."
+"We use MLflow judges to score each response against business rules: groundedness, actionability, and safety. Custom judges let teams add domain-specific checks — like format compliance and latency gates — alongside MLflow's built-in scorers. This lets us track quality over time and gate regressions before production."

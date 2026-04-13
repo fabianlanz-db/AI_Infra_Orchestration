@@ -1,1 +1,1 @@
-"""Reusable framework utilities for FM, VS, Lakebase, tracing, and consolidated external model integration hooks."""
+"""Reusable framework utilities for FM, VS, Lakebase, tracing, external model integration hooks, and custom judges."""

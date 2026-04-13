@@ -1,6 +1,9 @@
 """
 Run baseline MLflow GenAI evaluation for the FM-first app pattern.
 
+Combines built-in MLflow scorers (Correctness, Guidelines) with custom
+judges from ``framework.judge_hooks`` for a comprehensive quality gate.
+
 Usage:
   python scripts/run_mlflow_eval.py
 """
@@ -13,9 +16,9 @@ from pathlib import Path
 
 import mlflow
 import mlflow.genai
-from mlflow.genai.scorers import Correctness, Guidelines
 
 from framework.fm_agent_utils import FmAgentClient
+from framework.judge_hooks import build_judge_suite
 from framework.mlflow_tracing_utils import configure_tracing
 from framework.vector_search_utils import VectorSearchClient
 
@@ -51,16 +54,11 @@ def main() -> None:
     vs_client = VectorSearchClient()
     predict_fn = build_predict_fn(fm_client, vs_client)
 
-    scorers = [
-        Guidelines(
-            name="operational_actionability",
-            guidelines=(
-                "The response must include clear operational actions and avoid unsupported claims."
-            ),
-            model=f"databricks:/{fm_client.endpoint_name}",
-        ),
-        Correctness(model=f"databricks:/{fm_client.endpoint_name}"),
-    ]
+    scorers = build_judge_suite(
+        fm_endpoint=fm_client.endpoint_name,
+        include_builtin_correctness=True,
+        include_builtin_guidelines=True,
+    )
 
     results = mlflow.genai.evaluate(
         data=eval_dataset,

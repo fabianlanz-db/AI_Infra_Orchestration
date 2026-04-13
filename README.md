@@ -62,6 +62,7 @@ The design supports multiple agent implementations while keeping the backend sta
   - `vector_search_utils.py`
   - `lakebase_utils.py`
   - `mlflow_tracing_utils.py`
+  - `judge_hooks.py` - custom judge protocol, reference judges, and MLflow scorer bridge
 - `scripts/` - bootstrap, synthetic data generation, and evaluation scripts
 - `docs/external_connectivity_guidelines.md` - production connectivity guidance
 - `README_DEMO.md` - demo runbook with deployment steps
@@ -88,6 +89,17 @@ uv run python scripts/bootstrap_ai_infra_resources.py
 python scripts/build_eval_dataset.py
 python scripts/run_mlflow_eval.py
 ```
+
+### Assessment with Custom Judges
+
+Run a full assessment using pluggable custom judges (format compliance, latency threshold, groundedness) alongside MLflow's built-in scorers:
+
+```bash
+python scripts/build_assessment_dataset.py
+python scripts/run_assessment.py
+```
+
+Custom judges implement the `JudgeClient` protocol defined in `framework/judge_hooks.py`. Teams can add domain-specific judges by implementing `name` and `evaluate(JudgeInput) -> JudgeVerdict`. See `docs/mlflow_judging_guidelines.md` for the full pattern.
 
 ## Databricks Runtime Guidance
 
