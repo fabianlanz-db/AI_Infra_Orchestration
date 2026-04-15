@@ -25,6 +25,13 @@ This repository demonstrates how to connect external or custom agent runtimes to
 - **MLflow**: end-to-end tracing, quality evaluation, and observability.
 - **Unity Catalog**: governance and access control over all data assets.
 
+### Routing & skill orchestration
+
+- **Skill Registry**: Protocol-based registry for declaring, discovering, and executing agent skills.
+- **MCP Catalog**: Unified catalog for managed, custom, and external MCP servers.
+- **Router**: Intent-to-skill dispatch with rule-based, semantic, LLM, and composite strategies.
+- **DSPy / LangGraph Adapters**: Optional adapter layers so these frameworks can use Databricks infra.
+
 ## Connect Any Agent Through Databricks Backend
 
 The design supports multiple agent implementations while keeping the backend standardized.
@@ -63,8 +70,14 @@ The design supports multiple agent implementations while keeping the backend sta
   - `lakebase_utils.py`
   - `mlflow_tracing_utils.py`
   - `judge_hooks.py` - custom judge protocol, reference judges, and MLflow scorer bridge
+  - `skill_registry.py` - skill protocol, registry, discovery, and reference skill implementations
+  - `mcp_catalog_utils.py` - MCP server catalog (managed/custom/external) with skill registry bridging
+  - `router.py` - router protocol with rule-based, semantic, LLM, and composite implementations
+  - `dspy_adapter.py` - adapter layer for DSPy (optional dependency)
+  - `langgraph_adapter.py` - adapter layer for LangGraph/LangChain (optional dependency)
 - `scripts/` - bootstrap, synthetic data generation, and evaluation scripts
 - `docs/external_connectivity_guidelines.md` - production connectivity guidance
+- `docs/routing_architecture.md` - routing, skill registry, and MCP catalog architecture
 - `README_DEMO.md` - demo runbook with deployment steps
 
 ## Quick Start
@@ -100,6 +113,22 @@ python scripts/run_assessment.py
 ```
 
 Custom judges implement the `JudgeClient` protocol defined in `framework/judge_hooks.py`. Teams can add domain-specific judges by implementing `name` and `evaluate(JudgeInput) -> JudgeVerdict`. See `docs/mlflow_judging_guidelines.md` for the full pattern.
+
+### Skill Catalog & Routing
+
+Bootstrap the skill catalog with reference skills and MCP server configs:
+
+```bash
+python scripts/bootstrap_skill_catalog.py
+```
+
+Evaluate routing accuracy against expected skill mappings:
+
+```bash
+python scripts/run_routing_eval.py
+```
+
+See `docs/routing_architecture.md` for the full routing design, skill lifecycle, and DSPy/LangGraph integration patterns.
 
 ## Databricks Runtime Guidance
 
