@@ -83,7 +83,7 @@ class LakebaseCheckpointer:
     def _ensure_table(self) -> None:
         # Uses LakebaseMemoryStore._connect() directly for raw SQL access.
         # If LakebaseMemoryStore gains a public execute_sql(), migrate to that.
-        with self._store._connect() as conn, conn.cursor() as cur:
+        with self._store.connection() as conn, conn.cursor() as cur:
             cur.execute(self.TABLE_DDL)
             conn.commit()
 
@@ -93,7 +93,7 @@ class LakebaseCheckpointer:
         thread_id = config.get("configurable", {}).get("thread_id", "default")
         checkpoint_id = checkpoint.get("id", str(time.time_ns()))
         parent_id = config.get("configurable", {}).get("checkpoint_id")
-        with self._store._connect() as conn, conn.cursor() as cur:
+        with self._store.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO graph_checkpoints (thread_id, checkpoint_id, parent_id, checkpoint, metadata)
                    VALUES (%s, %s, %s, %s, %s)
@@ -109,7 +109,7 @@ class LakebaseCheckpointer:
         """Load the latest checkpoint for a thread."""
         thread_id = config.get("configurable", {}).get("thread_id", "default")
         checkpoint_id = config.get("configurable", {}).get("checkpoint_id")
-        with self._store._connect() as conn, conn.cursor() as cur:
+        with self._store.connection() as conn, conn.cursor() as cur:
             if checkpoint_id:
                 cur.execute(
                     "SELECT checkpoint, metadata FROM graph_checkpoints WHERE thread_id=%s AND checkpoint_id=%s",
@@ -127,7 +127,7 @@ class LakebaseCheckpointer:
 
     def list_checkpoints(self, thread_id: str, limit: int = 10) -> list[dict[str, Any]]:
         """List recent checkpoints for a thread."""
-        with self._store._connect() as conn, conn.cursor() as cur:
+        with self._store.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT checkpoint_id, parent_id, metadata, created_at FROM graph_checkpoints WHERE thread_id=%s ORDER BY created_at DESC LIMIT %s",
                 (thread_id, limit),

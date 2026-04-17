@@ -16,14 +16,13 @@ This file is the canonical home for external model integration logic.
 `framework/openapi_model_adapter.py` is kept as a compatibility wrapper.
 """
 
-import json
+from __future__ import annotations
+
 import time
-import urllib.error
-import urllib.request
-from dataclasses import dataclass
-from dataclasses import field
-from typing import Any
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
+
+import httpx
 
 from framework.fm_agent_utils import FmResponse
 from framework.lakebase_utils import LakebaseMemoryStore
@@ -83,6 +82,8 @@ class OpenApiModelConfig:
     response_text_path: str = "choices.0.message.content"
     health_url: str | None = None
     health_method: str = "GET"
+    max_retries: int = 2
+    retry_backoff_seconds: float = 0.5
 
 
 def _extract_by_path(payload: Any, dotted_path: str) -> Any:
@@ -102,13 +103,12 @@ class OpenApiModelClient(ExternalModelClient):
     Override `build_request_body()` if your endpoint expects a custom schema.
     """
 
-    def __init__(self, config: OpenApiModelConfig) -> None:
+    def __init__(self, config: OpenApiModelConfig, client: httpx.Client | None = None) -> None:
         self.config = config
+        self._client = client or httpx.Client(timeout=config.timeout_seconds)
 
     def build_request_body(self, request: ExternalModelRequest) -> dict[str, Any]:
-        """
-        Default request schema (OpenAI-style chat payload).
-        """
+        """Default request schema (OpenAI-style chat payload)."""
         return {
             "model": self.config.default_model,
             "temperature": request.temperature,
@@ -118,18 +118,38 @@ class OpenApiModelClient(ExternalModelClient):
             ],
         }
 
-    def _http_json(self, url: str, method: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        data = json.dumps(body or {}).encode("utf-8") if body is not None else None
+    def _request_json(
+        self, url: str, method: str, body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         headers = {"Content-Type": "application/json", **self.config.headers}
-        request = urllib.request.Request(url=url, data=data, headers=headers, method=method.upper())
-        with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
-            content = response.read().decode("utf-8")
-            return json.loads(content) if content else {}
+        last_exc: Exception | None = None
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                response = self._client.request(
+                    method=method.upper(),
+                    url=url,
+                    headers=headers,
+                    json=body if method.upper() != "GET" else None,
+                    timeout=self.config.timeout_seconds,
+                )
+                response.raise_for_status()
+                if not response.content:
+                    return {}
+                return response.json()
+            except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+                last_exc = exc
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                retryable = status in (408, 425, 429, 500, 502, 503, 504) or isinstance(exc, httpx.RequestError)
+                if not retryable or attempt == self.config.max_retries:
+                    raise
+                time.sleep(self.config.retry_backoff_seconds * (2 ** attempt))
+        assert last_exc is not None
+        raise last_exc
 
     def generate(self, request: ExternalModelRequest) -> FmResponse:
         start = time.perf_counter()
         payload = self.build_request_body(request)
-        response_json = self._http_json(
+        response_json = self._request_json(
             url=self.config.inference_url,
             method=self.config.method,
             body=payload,
@@ -143,13 +163,25 @@ class OpenApiModelClient(ExternalModelClient):
         )
 
     def health(self) -> tuple[bool, str]:
+        """Liveness probe. Defaults to GET on ``health_url`` (or inference URL)."""
         url = self.config.health_url or self.config.inference_url
-        method = self.config.health_method if self.config.health_url else self.config.method
+        method = self.config.health_method
         try:
-            _ = self._http_json(url=url, method=method, body={} if method.upper() != "GET" else None)
-            return True, "External OpenAPI model endpoint reachable"
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, KeyError, IndexError, ValueError) as exc:
+            response = self._client.request(
+                method=method.upper(),
+                url=url,
+                headers=self.config.headers,
+                timeout=self.config.timeout_seconds,
+            )
+            # Treat any non-5xx as reachable for a bare liveness probe.
+            if response.status_code < 500:
+                return True, f"External OpenAPI model endpoint reachable (HTTP {response.status_code})"
+            return False, f"External OpenAPI model returned HTTP {response.status_code}"
+        except (httpx.RequestError, ValueError, KeyError, IndexError) as exc:
             return False, f"External OpenAPI model error: {exc}"
+
+    def close(self) -> None:
+        self._client.close()
 
 
 @dataclass

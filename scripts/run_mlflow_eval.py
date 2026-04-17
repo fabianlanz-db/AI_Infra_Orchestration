@@ -26,7 +26,10 @@ from framework.vector_search_utils import VectorSearchClient
 def build_predict_fn(fm_client: FmAgentClient, vs_client: VectorSearchClient):
     def predict_fn(query: str):
         retrieval = vs_client.retrieve(query, top_k=5)
-        context = "\n\n".join([str(row[6]) for row in retrieval.rows[:5]]) if retrieval.rows else "No context."
+        context = (
+            "\n\n".join(row.content for row in retrieval.rows[:5])
+            if retrieval.rows else "No context."
+        )
         response = fm_client.generate(
             system_prompt=(
                 "You are an industrial operations assistant. Use only retrieved context and be concise."

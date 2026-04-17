@@ -15,9 +15,10 @@ env:
     value: "databricks_postgres"
   - name: LAKEBASE_DB_USER
     value: "ai_infra_app_user"
-  # TODO: move LAKEBASE_DB_PASSWORD to a Databricks secret reference for production use.
-  # For now this demo credential is kept inline so the app starts reliably.
+  # LAKEBASE_DB_PASSWORD is only used as a local-dev fallback. In Databricks Apps the
+  # runtime resolves this via a secret reference; if unset, the app falls back to
+  # WorkspaceClient-issued OAuth tokens (see LakebaseMemoryStore._connect).
   - name: LAKEBASE_DB_PASSWORD
-    value: "REPLACE_WITH_SECRET_OR_ENV_INJECTION"
+    valueFrom: "lakebase_db_password"
   - name: MLFLOW_EXPERIMENT_NAME
     value: "/Shared/ai-infra-fm-agent-demo"

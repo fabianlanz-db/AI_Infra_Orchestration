@@ -42,7 +42,7 @@ def build_predict_fn(fm_client: FmAgentClient, vs_client: VectorSearchClient):
         if not context:
             retrieval = vs_client.retrieve(query, top_k=5)
             context = (
-                "\n\n".join([str(row[6]) for row in retrieval.rows[:5]])
+                "\n\n".join(row.content for row in retrieval.rows[:5])
                 if retrieval.rows
                 else "No context."
             )

@@ -8,12 +8,13 @@ to build mixed scorer suites for mlflow.genai.evaluate().
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 import mlflow.genai
 from mlflow.genai.scorers import Correctness, Guidelines
+
+from framework._text_utils import extract_terms
 
 
 @dataclass
@@ -117,16 +118,6 @@ class LatencyThresholdJudge:
         return JudgeVerdict(judge_name=self.name, passed=passed, score=score, rationale=rationale)
 
 
-_STOP_WORDS = frozenset({
-    "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
-    "her", "was", "one", "our", "out", "has", "have", "been", "from",
-    "this", "that", "with", "they", "will", "each", "make", "like",
-    "than", "them", "then", "into", "over", "such", "when", "very",
-    "some", "just", "also", "more", "other", "would", "about", "should",
-    "these", "their", "which", "could", "does", "most", "what", "only",
-})
-
-
 class GroundednessJudge:
     """Check response is grounded in retrieved context via term-overlap heuristic.
 
@@ -154,8 +145,8 @@ class GroundednessJudge:
         if not input.context.strip():
             return self._evaluate_no_context(input)
 
-        context_terms = set(_extract_terms(input.context))
-        response_terms = set(_extract_terms(input.response))
+        context_terms = extract_terms(input.context)
+        response_terms = extract_terms(input.response)
 
         if not response_terms:
             return JudgeVerdict(
@@ -191,11 +182,6 @@ class GroundednessJudge:
                 else "No context provided but response makes claims without hedging."
             ),
         )
-
-
-def _extract_terms(text: str) -> list[str]:
-    """Extract meaningful terms (3+ alpha chars, lowered, stop-words removed)."""
-    return [t for t in re.findall(r"[a-zA-Z]{3,}", text.lower()) if t not in _STOP_WORDS]
 
 
 def make_mlflow_scorer(judge: JudgeClient):

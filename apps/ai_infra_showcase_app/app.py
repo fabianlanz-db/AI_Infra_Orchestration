@@ -1,3 +1,4 @@
+import logging
 import os
 import statistics
 import time
@@ -7,10 +8,12 @@ import mlflow
 import streamlit as st
 import streamlit.components.v1 as components
 
+logger = logging.getLogger(__name__)
+
 from framework.fm_agent_utils import FmAgentClient
 from framework.lakebase_utils import LakebaseMemoryStore
 from framework.mlflow_tracing_utils import configure_tracing, traced, verify_traces
-from framework.vector_search_utils import VectorSearchClient
+from framework.vector_search_utils import VectorSearchClient, format_context_block
 
 st.set_page_config(page_title="AI Infra FM Agent + Lakebase + Vector Search", layout="wide")
 st.title("AI Infra Agent Framework (FM Endpoint First)")
@@ -43,16 +46,7 @@ def retrieve_context(query: str, top_k: int):
 
 @traced(name="ai_infra_fm_generate", span_type="CHAT_MODEL")
 def generate_answer(query: str, context_rows: list[list], top_k: int):
-    context_block = "\n\n".join(
-        [
-            (
-                f"chunk_id={row[0]}, asset_id={row[1]}, doc_type={row[2]}, issue_type={row[3]}, "
-                f"severity={row[4]}, subsystem={row[5]}, tags={row[7]}\n"
-                f"content={row[6]}"
-            )
-            for row in context_rows[:top_k]
-        ]
-    )
+    context_block = format_context_block(context_rows, top_k=top_k)
     system_prompt = (
         "You are an industrial operations assistant. Use only provided retrieved context. "
         "If context is insufficient, say so clearly. Keep response concise and actionable."
@@ -84,6 +78,7 @@ def run_agent_turn(session_id: str, prompt: str, top_k: int):
     fm_response = generate_answer(prompt, retrieval.rows, top_k)
     user_event = None
     assistant_event = None
+    memory_error: str | None = None
     if memory_store is not None:
         try:
             user_event = write_memory(
@@ -98,11 +93,13 @@ def run_agent_turn(session_id: str, prompt: str, top_k: int):
                 fm_response.text,
                 {"model": fm_response.model, "top_k": top_k},
             )
-        except Exception:
-            pass
-    return retrieval, fm_response, user_event, assistant_event
+        except Exception as exc:
+            logger.exception("Lakebase memory write failed for session %s", session_id)
+            memory_error = str(exc)
+    return retrieval, fm_response, user_event, assistant_event, memory_error
 
 
+@st.cache_data(ttl=10)
 def dependency_status():
     fm_ok, fm_msg = fm_client.health()
     vs_ok, vs_msg = vs_client.health()
@@ -158,18 +155,28 @@ with st.sidebar:
         f"VS: {status['vector_search']['message']} | "
         f"LB: {status['lakebase']['message']}"
     )
+    if st.button("Refresh status now"):
+        dependency_status.clear()
+        st.rerun()
     if auto_refresh:
+        # Preserve session_state across refreshes by asking Streamlit to rerun
+        # rather than reloading the parent window.
         components.html(
             """
             <script>
                 setTimeout(function() {
-                    window.parent.location.reload();
+                    const evt = new CustomEvent('streamlit:componentReady');
+                    window.parent.document.dispatchEvent(evt);
+                    window.parent.postMessage({type: 'streamlit:rerun'}, '*');
                 }, 10000);
             </script>
             """,
             height=0,
             width=0,
         )
+        time.sleep(10)
+        dependency_status.clear()
+        st.rerun()
 
 left, right = st.columns(2)
 
@@ -183,11 +190,13 @@ with left:
     if st.button("Run Agent", type="primary"):
         start = time.perf_counter()
         with st.spinner("Retrieving + generating response..."):
-            retrieval, fm_response, user_event, assistant_event = run_agent_turn(
+            retrieval, fm_response, user_event, assistant_event, memory_error = run_agent_turn(
                 st.session_state.session_id, prompt, top_k
             )
             if memory_store is None:
                 st.warning(f"Lakebase memory write skipped: {memory_store_error}")
+            elif memory_error:
+                st.warning(f"Lakebase memory write failed: {memory_error}")
             elif not (user_event and assistant_event):
                 st.warning("Lakebase memory write skipped due to runtime error.")
         total_latency = int((time.perf_counter() - start) * 1000)
@@ -200,7 +209,7 @@ with left:
         st.metric("Total latency (ms)", total_latency)
         if user_event and assistant_event:
             st.caption(f"Memory event IDs: user={user_event.event_id}, assistant={assistant_event.event_id}")
-        st.json(retrieval.rows[:3])
+        st.json([r.as_dict() for r in retrieval.rows[:3]])
 
 with right:
     st.subheader("Session Memory (Lakebase)")
@@ -229,11 +238,16 @@ with right:
         if not samples:
             st.info("No latency samples yet.")
         else:
+            # statistics.quantiles requires n >= 2; for a single sample, p95 == sample.
+            if len(samples) >= 2:
+                p95 = int(statistics.quantiles(samples, n=20)[18])
+            else:
+                p95 = int(samples[0])
             st.json(
                 {
                     "count": len(samples),
                     "p50_ms": int(statistics.median(samples)),
-                    "p95_ms": int(sorted(samples)[max(0, int(len(samples) * 0.95) - 1)]),
+                    "p95_ms": p95,
                     "max_ms": max(samples),
                 }
             )

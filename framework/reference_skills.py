@@ -42,7 +42,10 @@ class VectorSearchSkill:
         result = self._client.retrieve(input.query, top_k=top_k)
         latency_ms = int((time.perf_counter() - start) * 1000)
         return SkillResult(
-            output={"rows": result.rows, "retrieval_latency_ms": result.latency_ms},
+            output={
+                "rows": [r.as_dict() for r in result.rows],
+                "retrieval_latency_ms": result.latency_ms,
+            },
             latency_ms=latency_ms,
             skill_name=self.name,
         )

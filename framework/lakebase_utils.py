@@ -1,12 +1,21 @@
+from __future__ import annotations
+
 import base64
 import json
+import logging
 import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 
 import psycopg
 from databricks.sdk import WorkspaceClient
+
+logger = logging.getLogger(__name__)
+
+# OAuth tokens from Databricks postgres typically live ~1h; refresh well before.
+_TOKEN_TTL_SECONDS = 50 * 60
 
 
 @dataclass
@@ -16,7 +25,13 @@ class MemoryWriteResult:
 
 
 class LakebaseMemoryStore:
-    """Reusable Lakebase utility with OAuth token generation and memory helpers."""
+    """Reusable Lakebase utility with OAuth token generation and memory helpers.
+
+    Exposes a public ``connection()`` context manager so adapters (e.g. the
+    LangGraph checkpointer) can run raw SQL without reaching into private
+    methods. OAuth tokens are cached for ``_TOKEN_TTL_SECONDS`` and the
+    resolved DB user is memoized to avoid repeated candidate-probing.
+    """
 
     def __init__(self) -> None:
         self.workspace = WorkspaceClient()
@@ -27,9 +42,12 @@ class LakebaseMemoryStore:
         if not self.host:
             raise ValueError("LAKEBASE_HOST env var is required")
         self.dbname = os.environ.get("LAKEBASE_DB_NAME", "databricks_postgres")
-        self.db_password = os.environ.get("LAKEBASE_DB_PASSWORD")
+        self.db_password = os.environ.get("LAKEBASE_DB_PASSWORD") or None
         self.db_user = self._resolve_db_user()
-        self._ensure_table()
+        self._cached_token: str | None = None
+        self._cached_token_at: float = 0.0
+        self._resolved_user: str | None = None
+        self._table_ready = False
 
     def _resolve_db_user(self) -> str:
         explicit_user = os.environ.get("LAKEBASE_DB_USER")
@@ -41,9 +59,15 @@ class LakebaseMemoryStore:
         return self.workspace.current_user.me().user_name
 
     def _token(self) -> str:
-        return self.workspace.postgres.generate_database_credential(
+        now = time.time()
+        if self._cached_token and (now - self._cached_token_at) < _TOKEN_TTL_SECONDS:
+            return self._cached_token
+        token = self.workspace.postgres.generate_database_credential(
             endpoint=self.endpoint_resource
         ).token
+        self._cached_token = token
+        self._cached_token_at = now
+        return token
 
     def _subject_from_token(self, token: str) -> str | None:
         try:
@@ -58,7 +82,7 @@ class LakebaseMemoryStore:
         except Exception:
             return None
 
-    def _connect(self) -> psycopg.Connection:
+    def _open_connection(self) -> psycopg.Connection:
         if self.db_password:
             return psycopg.connect(
                 host=self.host,
@@ -69,34 +93,39 @@ class LakebaseMemoryStore:
             )
 
         token = self._token()
+
+        if self._resolved_user:
+            return psycopg.connect(
+                host=self.host,
+                dbname=self.dbname,
+                user=self._resolved_user,
+                password=token,
+                sslmode="require",
+            )
+
         token_subject = self._subject_from_token(token)
-        explicit_user = os.environ.get("LAKEBASE_DB_USER")
         candidates: list[str] = []
-        for candidate in [explicit_user, token_subject, self.db_user]:
+        for candidate in [os.environ.get("LAKEBASE_DB_USER"), token_subject, self.db_user]:
             if candidate and candidate not in candidates:
                 candidates.append(candidate)
 
-        if os.environ.get("LAKEBASE_DEBUG_AUTH") == "1":
-            print(
-                "Lakebase auth debug:",
-                {
-                    "token_subject": token_subject,
-                    "candidate_users": candidates,
-                    "endpoint_resource": self.endpoint_resource,
-                    "host": self.host,
-                },
-            )
+        logger.debug(
+            "Lakebase auth: probing %d candidate(s) for endpoint=%s host=%s",
+            len(candidates), self.endpoint_resource, self.host,
+        )
 
         last_error: Exception | None = None
         for user in candidates:
             try:
-                return psycopg.connect(
+                conn = psycopg.connect(
                     host=self.host,
                     dbname=self.dbname,
                     user=user,
                     password=token,
                     sslmode="require",
                 )
+                self._resolved_user = user
+                return conn
             except psycopg.OperationalError as exc:
                 last_error = exc
 
@@ -104,24 +133,26 @@ class LakebaseMemoryStore:
             raise last_error
         raise RuntimeError("No Lakebase DB user candidates were resolved")
 
-    def _ensure_table(self) -> None:
-        ddl = """
-        CREATE TABLE IF NOT EXISTS session_memory (
-          id BIGSERIAL PRIMARY KEY,
-          session_id TEXT NOT NULL,
-          role TEXT NOT NULL,
-          content TEXT NOT NULL,
-          metadata JSONB,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
+    @contextmanager
+    def connection(self) -> Iterator[psycopg.Connection]:
+        """Public context manager yielding a connected psycopg connection.
+
+        Ensures the session_memory table exists on first use.
         """
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(ddl)
-            conn.commit()
+        conn = self._open_connection()
+        try:
+            if not self._table_ready:
+                with conn.cursor() as cur:
+                    cur.execute(_SESSION_MEMORY_DDL)
+                    conn.commit()
+                self._table_ready = True
+            yield conn
+        finally:
+            conn.close()
 
     def write(self, session_id: str, role: str, content: str, metadata: dict[str, Any] | None = None) -> MemoryWriteResult:
         start = time.perf_counter()
-        with self._connect() as conn, conn.cursor() as cur:
+        with self.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO session_memory (session_id, role, content, metadata)
@@ -135,7 +166,7 @@ class LakebaseMemoryStore:
         return MemoryWriteResult(event_id=event_id, latency_ms=int((time.perf_counter() - start) * 1000))
 
     def read(self, session_id: str, limit: int = 20) -> list[dict[str, Any]]:
-        with self._connect() as conn, conn.cursor() as cur:
+        with self.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT id, session_id, role, content, metadata, created_at
@@ -173,11 +204,7 @@ class LakebaseMemoryStore:
         assistant_message: str,
         assistant_metadata: dict[str, Any] | None = None,
     ) -> dict[str, MemoryWriteResult]:
-        """
-        Convenience hook for external APIs to persist one full turn.
-
-        Writes user message first, then assistant output.
-        """
+        """Convenience hook for external APIs to persist one full turn."""
         user_result = self.write(
             session_id=session_id,
             role="user",
@@ -193,12 +220,22 @@ class LakebaseMemoryStore:
         return {"user": user_result, "assistant": assistant_result}
 
     def build_external_memory_payload(self, session_id: str, limit: int = 20) -> dict[str, Any]:
-        """
-        External API hook: export session memory in a stable payload shape.
-        """
+        """External API hook: export session memory in a stable payload shape."""
         events = self.read(session_id=session_id, limit=limit)
         return {
             "session_id": session_id,
             "event_count": len(events),
             "events": events,
         }
+
+
+_SESSION_MEMORY_DDL = """
+CREATE TABLE IF NOT EXISTS session_memory (
+  id BIGSERIAL PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  metadata JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""

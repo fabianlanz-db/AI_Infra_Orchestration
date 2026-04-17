@@ -1,18 +1,21 @@
 """
 Skill registry for agent-agnostic tool discovery and execution.
 
-Provides SkillClient protocol, typed I/O dataclasses, a SkillRegistry
-with optional semantic discovery via Vector Search, and reference skill
-implementations wrapping existing framework capabilities.
+Provides the ``SkillClient`` protocol, typed I/O dataclasses, and a
+``SkillRegistry`` that supports keyword-overlap discovery out of the box.
+For true semantic discovery, inject an embedder via
+``SkillRegistry.configure_embedder()`` — when configured, ``discover()``
+switches to cosine similarity over embedding vectors.
 """
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from framework._text_utils import extract_terms
+
+Embedder = Callable[[list[str]], list[list[float]]]
 
 
 @dataclass
@@ -82,12 +85,29 @@ def keyword_score(query: str, definition: SkillDefinition) -> float:
 class SkillRegistry:
     """In-memory skill registry with optional semantic discovery.
 
-    Register skills via ``register()``, discover them via keyword matching,
-    and optionally upgrade to semantic search by providing a VectorSearchClient.
+    Register skills via ``register()`` and discover them via ``discover()``.
+    By default, discovery uses keyword overlap. Call
+    ``configure_embedder(embedder)`` once at startup to upgrade discovery to
+    true semantic cosine similarity over embedding vectors.
     """
 
     def __init__(self) -> None:
         self._skills: dict[str, SkillClient] = {}
+        self._embedder: Embedder | None = None
+        self._embedding_cache: dict[str, list[float]] = {}
+
+    def configure_embedder(self, embedder: Embedder) -> None:
+        """Enable semantic ``discover()`` using the given embedder.
+
+        The embedder must map a batch of texts to vectors. Skill embeddings
+        are cached lazily keyed on ``name + description``; call
+        :meth:`invalidate_embeddings` if a skill's description changes.
+        """
+        self._embedder = embedder
+        self._embedding_cache.clear()
+
+    def invalidate_embeddings(self) -> None:
+        self._embedding_cache.clear()
 
     def register(self, skill: SkillClient) -> None:
         """Add a skill to the registry."""
@@ -96,6 +116,7 @@ class SkillRegistry:
     def unregister(self, name: str) -> None:
         """Remove a skill by name. No-op if not found."""
         self._skills.pop(name, None)
+        self._embedding_cache.pop(name, None)
 
     def get(self, name: str) -> SkillClient | None:
         """Lookup a skill by exact name."""
@@ -106,17 +127,46 @@ class SkillRegistry:
         return [s.definition for s in self._skills.values()]
 
     def discover(self, query: str, top_k: int = 5) -> list[SkillDefinition]:
-        """Find skills matching a query via keyword scoring.
+        """Find skills matching a query.
 
-        Scores each skill description against the query and returns
-        the top-k matches sorted by relevance.
+        Uses cosine similarity if an embedder was configured via
+        :meth:`configure_embedder`, otherwise falls back to keyword overlap
+        scoring. Returns up to ``top_k`` definitions sorted by relevance.
         """
-        scored = [
-            (keyword_score(query, s.definition), s.definition)
-            for s in self._skills.values()
-        ]
+        if self._embedder is None:
+            scored_kw: list[tuple[float, SkillDefinition]] = [
+                (keyword_score(query, s.definition), s.definition)
+                for s in self._skills.values()
+            ]
+            scored_kw.sort(key=lambda pair: pair[0], reverse=True)
+            return [defn for score, defn in scored_kw[:top_k] if score > 0]
+
+        return self._semantic_discover(query, top_k)
+
+    def _semantic_discover(self, query: str, top_k: int) -> list[SkillDefinition]:
+        assert self._embedder is not None
+        defs = [s.definition for s in self._skills.values()]
+        missing = [d for d in defs if d.name not in self._embedding_cache]
+        if missing:
+            texts = [f"{d.name}. {d.description}. tags: {', '.join(d.tags)}" for d in missing]
+            vectors = self._embedder(texts)
+            for d, v in zip(missing, vectors):
+                self._embedding_cache[d.name] = v
+        [qvec] = self._embedder([query])
+        scored = [(self._cosine(qvec, self._embedding_cache[d.name]), d) for d in defs]
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [defn for score, defn in scored[:top_k] if score > 0]
+
+    @staticmethod
+    def _cosine(a: list[float], b: list[float]) -> float:
+        if not a or not b:
+            return 0.0
+        dot = sum(x * y for x, y in zip(a, b))
+        na = sum(x * x for x in a) ** 0.5
+        nb = sum(y * y for y in b) ** 0.5
+        if na == 0 or nb == 0:
+            return 0.0
+        return dot / (na * nb)
 
     def health(self) -> tuple[bool, str]:
         count = len(self._skills)

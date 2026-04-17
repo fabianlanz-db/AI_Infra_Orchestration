@@ -6,15 +6,82 @@ This repository demonstrates how to connect external or custom agent runtimes to
 
 ## Architecture
 
-```text
-+-----------------------------+      +---------------------------------------+
-| Agent Runtime (Any)         | ---> | Databricks AI Backend                 |
-| - Databricks App            |      | - Foundation Model Serving Endpoint   |
-| - External API service      |      | - Vector Search Indexes               |
-| - Third-party orchestration |      | - Lakebase (PostgreSQL)               |
-| - Custom UI / SDK client    |      | - Unity Catalog governed data         |
-+-----------------------------+      | - MLflow Tracing + Evaluation         |
-                                     +---------------------------------------+
+```mermaid
+flowchart LR
+    subgraph Runtimes["Agent Runtimes (any)"]
+        direction TB
+        R1["Databricks App<br/>(Streamlit)"]
+        R2["External API<br/>service"]
+        R3["DSPy program"]
+        R4["LangGraph graph"]
+        R5["Custom UI / SDK"]
+    end
+
+    subgraph Framework["Orchestration Framework (framework/)"]
+        direction TB
+        Router["Router<br/>rule · semantic · LLM · composite"]
+        Registry["Skill Registry<br/>+ MCP Catalog"]
+        Adapters["DSPy / LangGraph / OpenAPI<br/>adapters"]
+        Judges["Judge framework<br/>(custom + MLflow scorers)"]
+        Tracing["MLflow tracing<br/>(trace-id propagation)"]
+
+        Router --> Registry
+        Registry --> Adapters
+    end
+
+    subgraph Backend["Databricks AI Backend"]
+        direction TB
+        FM["Foundation Model<br/>Serving Endpoint"]
+        VS["Vector Search<br/>(hybrid index)"]
+        LB[("Lakebase<br/>Postgres memory<br/>+ checkpoints")]
+        MLF["MLflow<br/>Tracing + Eval"]
+        UC["Unity Catalog<br/>(governance)"]
+    end
+
+    Runtimes --> Framework
+    Framework --> Backend
+
+    Router -. routes to .-> FM
+    Registry -. retrieves .-> VS
+    Registry -. reads/writes .-> LB
+    Adapters -. checkpoints .-> LB
+    Judges -. logs scores .-> MLF
+    Tracing -. emits traces .-> MLF
+    VS -- governed by --> UC
+    LB -- governed by --> UC
+
+    classDef run fill:#e8f1ff,stroke:#4a79c4,color:#1f3864;
+    classDef fw  fill:#fff4e0,stroke:#d9a441,color:#6b4513;
+    classDef be  fill:#e6f4ea,stroke:#3f9b5a,color:#1f5e33;
+    class R1,R2,R3,R4,R5 run;
+    class Router,Registry,Adapters,Judges,Tracing fw;
+    class FM,VS,LB,MLF,UC be;
+```
+
+### Routed turn — sequence
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Runtime as Agent Runtime
+    participant Router
+    participant Registry as Skill Registry
+    participant Skill as Resolved Skill
+    participant Backend as Databricks Backend
+    participant MLflow
+
+    User->>Runtime: prompt + session_id
+    Runtime->>Router: route(query, context)
+    Router->>Registry: list_skills()
+    Registry-->>Router: SkillDefinition[]
+    Router-->>Runtime: RoutingDecision (skill, confidence)
+    Runtime->>Skill: execute(SkillInput)
+    Skill->>Backend: VS.retrieve / FM.generate / Lakebase.read
+    Backend-->>Skill: result + latency
+    Skill-->>Runtime: SkillResult
+    Runtime->>Backend: Lakebase.write_exchange(session)
+    Runtime-->>MLflow: trace spans (routing, skill, backend)
+    Runtime-->>User: response + metrics
 ```
 
 ### Core backend services
@@ -65,17 +132,27 @@ The design supports multiple agent implementations while keeping the backend sta
 
 - `apps/ai_infra_showcase_app/` - Streamlit Databricks App reference implementation
 - `framework/` - reusable integration utilities:
-  - `fm_agent_utils.py`
-  - `vector_search_utils.py`
-  - `lakebase_utils.py`
-  - `mlflow_tracing_utils.py`
+  - `fm_agent_utils.py` - FM serving client with retry/backoff, cheap liveness probe, and `deep_health()` for end-to-end checks
+  - `vector_search_utils.py` - typed `RetrievalRow` dataclass, hybrid retrieval, context-block formatter
+  - `lakebase_utils.py` - session memory store with public `connection()` context manager and OAuth-token caching
+  - `mlflow_tracing_utils.py` - `configure_tracing`, `@traced` decorator, trace-header propagation
+  - `external_model_hooks.py` - `ExternalModelClient` protocol and httpx-based `OpenApiModelClient` with retry
+  - `openapi_model_adapter.py` - deprecated compat shim (will be removed)
   - `judge_hooks.py` - custom judge protocol, reference judges, and MLflow scorer bridge
-  - `skill_registry.py` - skill protocol, registry, discovery, and reference skill implementations
+  - `skill_registry.py` - skill protocol, registry with keyword **or** embedding-backed discovery
+  - `reference_skills.py` - VectorSearch / MemoryRead / MemoryWrite / Generate reference skills
   - `mcp_catalog_utils.py` - MCP server catalog (managed/custom/external) with skill registry bridging
-  - `router.py` - router protocol with rule-based, semantic, LLM, and composite implementations
+  - `router.py` - router protocol with rule-based, lexical, **embedding-backed semantic**, LLM, and composite implementations
   - `dspy_adapter.py` - adapter layer for DSPy (optional dependency)
   - `langgraph_adapter.py` - adapter layer for LangGraph/LangChain (optional dependency)
+  - `_text_utils.py` - shared stop-word list and term extraction
 - `scripts/` - bootstrap, synthetic data generation, and evaluation scripts
+  - `bootstrap_ai_infra_resources.py` - idempotent UC/VS/Lakebase provisioning (use `--force-tables` to recreate demo data)
+  - `bootstrap_skill_catalog.py` - populate the skill registry + MCP catalog; exits non-zero on partial bootstrap
+  - `build_eval_dataset.py` / `run_mlflow_eval.py` - baseline MLflow GenAI evaluation
+  - `build_assessment_dataset.py` / `run_assessment.py` - richer assessment with custom judges
+  - `run_routing_eval.py` - routing accuracy regression suite
+- `tests/unit/` - pytest suite for pure-logic modules (registry, router, judges, MCP catalog, VS row typing)
 - `docs/external_connectivity_guidelines.md` - production connectivity guidance
 - `docs/routing_architecture.md` - routing, skill registry, and MCP catalog architecture
 - `README_DEMO.md` - demo runbook with deployment steps

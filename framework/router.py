@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from framework.judge_hooks import JudgeInput, JudgeVerdict
 
+from framework.mlflow_tracing_utils import traced
 from framework.skill_registry import (
     SkillDefinition,
     SkillInput,
@@ -59,7 +60,25 @@ class RoutedTurnResult:
 
 @runtime_checkable
 class RouterClient(Protocol):
-    """Adapter contract for routers — select the best skill for a query."""
+    """Adapter contract for routers — select the best skill for a query.
+
+    Implementations receive a ``RoutingContext`` whose fields are used by
+    different routers to varying degrees:
+
+    * ``available_skills`` — REQUIRED for semantic/lexical/LLM routers. Rule-
+      based routers ignore it.
+    * ``session_id`` — surfaced to routers that score by conversational state.
+      Currently unused by the reference implementations but reserved.
+    * ``conversation_history`` — consumed by routers that condition on prior
+      turns (e.g. a stateful LLM router). Reference routers ignore it.
+    * ``metadata`` — free-form dict for experimental signals (e.g. user tier,
+      tenant flags). Reference routers ignore it.
+
+    A conforming router MUST return a ``RoutingDecision`` with ``confidence``
+    in ``[0.0, 1.0]``. Return ``skill_name=""`` with ``confidence=0.0`` if no
+    decision can be made; a ``CompositeRouter`` will fall through to the next
+    tier.
+    """
 
     def route(self, query: str, context: RoutingContext) -> RoutingDecision: ...
     def health(self) -> tuple[bool, str]: ...
@@ -69,23 +88,39 @@ class RouterClient(Protocol):
 
 
 class RuleBasedRouter:
-    """Keyword/pattern router. Rules map regex patterns to skill names. First match wins."""
+    """Keyword/pattern router. Rules map regex patterns to ``(skill, confidence)``.
+
+    Rules may be passed as 2-tuples ``(pattern, skill)`` — confidence defaults
+    to ``default_rule_confidence`` — or 3-tuples ``(pattern, skill, confidence)``
+    for fine-grained control so ambiguous rules don't block downstream tiers.
+    First match wins.
+    """
 
     def __init__(
         self,
-        rules: list[tuple[str, str]] | None = None,
+        rules: list[tuple] | None = None,
         default_skill: str = "generate",
+        default_rule_confidence: float = 1.0,
     ) -> None:
-        self._rules = [(re.compile(p, re.IGNORECASE), s) for p, s in (rules or [])]
+        self._rules: list[tuple[re.Pattern[str], str, float]] = []
+        for rule in rules or []:
+            if len(rule) == 2:
+                pattern, skill = rule
+                confidence = default_rule_confidence
+            elif len(rule) == 3:
+                pattern, skill, confidence = rule
+            else:
+                raise ValueError(f"Rule must be 2- or 3-tuple, got {rule!r}")
+            self._rules.append((re.compile(pattern, re.IGNORECASE), skill, float(confidence)))
         self._default = default_skill
 
     def route(self, query: str, context: RoutingContext) -> RoutingDecision:
         start = time.perf_counter()
-        for pattern, skill_name in self._rules:
+        for pattern, skill_name, confidence in self._rules:
             if pattern.search(query):
                 return RoutingDecision(
                     skill_name=skill_name,
-                    confidence=1.0,
+                    confidence=confidence,
                     rationale=f"Matched rule pattern: {pattern.pattern}",
                     latency_ms=int((time.perf_counter() - start) * 1000),
                 )
@@ -100,8 +135,12 @@ class RuleBasedRouter:
         return True, f"RuleBasedRouter: {len(self._rules)} rule(s)"
 
 
-class SemanticRouter:
-    """Skill-description similarity router using keyword scoring."""
+class LexicalRouter:
+    """Skill-description similarity router using keyword overlap scoring.
+
+    This is lexical (bag-of-words term overlap), not semantic — use
+    ``EmbeddingRouter`` for true semantic matching via an embedding model.
+    """
 
     def __init__(self, min_confidence: float = 0.1) -> None:
         self._min_confidence = min_confidence
@@ -130,7 +169,7 @@ class SemanticRouter:
         below = best_score < self._min_confidence
         rationale = (
             f"Below threshold ({best_score:.2f} < {self._min_confidence})" if below
-            else f"Semantic match {best_score:.2f} for '{best_skill.name}'"
+            else f"Lexical match {best_score:.2f} for '{best_skill.name}'"
         )
         return RoutingDecision(
             skill_name=best_skill.name, confidence=conf, rationale=rationale,
@@ -138,7 +177,82 @@ class SemanticRouter:
         )
 
     def health(self) -> tuple[bool, str]:
-        return True, "SemanticRouter active"
+        return True, "LexicalRouter active"
+
+
+# Back-compat alias. Old code and docs referenced ``SemanticRouter``; keep it
+# resolving to the lexical implementation until callers migrate.
+SemanticRouter = LexicalRouter
+
+
+class EmbeddingRouter:
+    """True semantic router using an embedding model for query/skill similarity.
+
+    Expects ``embedder`` to be a callable ``(texts: list[str]) -> list[list[float]]``.
+    Embeds all skill definitions once and caches vectors; re-embeds when the
+    available-skills set changes.
+    """
+
+    def __init__(
+        self,
+        embedder: Any,
+        min_confidence: float = 0.25,
+    ) -> None:
+        self._embedder = embedder
+        self._min_confidence = min_confidence
+        self._cache_key: tuple[str, ...] = ()
+        self._cached_vectors: list[list[float]] = []
+
+    @staticmethod
+    def _cosine(a: list[float], b: list[float]) -> float:
+        if not a or not b:
+            return 0.0
+        dot = sum(x * y for x, y in zip(a, b))
+        na = sum(x * x for x in a) ** 0.5
+        nb = sum(y * y for y in b) ** 0.5
+        if na == 0 or nb == 0:
+            return 0.0
+        return dot / (na * nb)
+
+    def _ensure_cached(self, skills: list[SkillDefinition]) -> None:
+        key = tuple(f"{s.name}:{s.description}" for s in skills)
+        if key == self._cache_key and self._cached_vectors:
+            return
+        texts = [f"{s.name}. {s.description}. tags: {', '.join(s.tags)}" for s in skills]
+        self._cached_vectors = self._embedder(texts)
+        self._cache_key = key
+
+    def route(self, query: str, context: RoutingContext) -> RoutingDecision:
+        start = time.perf_counter()
+        skills = context.available_skills
+        if not skills:
+            return RoutingDecision(
+                skill_name="", confidence=0.0, rationale="No skills available",
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
+        self._ensure_cached(skills)
+        [query_vec] = self._embedder([query])
+        scored = sorted(
+            [(skills[i], self._cosine(query_vec, v)) for i, v in enumerate(self._cached_vectors)],
+            key=lambda p: p[1], reverse=True,
+        )
+        best_skill, best_score = scored[0]
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        passed = best_score >= self._min_confidence
+        alternatives = [s.name for s, sc in scored[1:3] if sc > 0]
+        return RoutingDecision(
+            skill_name=best_skill.name if passed else "",
+            confidence=max(0.0, min(1.0, best_score)),
+            rationale=(
+                f"Embedding similarity {best_score:.3f} for '{best_skill.name}'"
+                if passed else f"Below threshold ({best_score:.3f} < {self._min_confidence})"
+            ),
+            alternatives=alternatives,
+            latency_ms=latency_ms,
+        )
+
+    def health(self) -> tuple[bool, str]:
+        return True, "EmbeddingRouter active"
 
 
 class LLMRouter:
@@ -177,8 +291,12 @@ class LLMRouter:
             data = json.loads(cleaned)
             skill_name = data.get("skill_name", "")
             valid_names = {s.name for s in skills}
-            if skill_name not in valid_names and skills:
-                skill_name = skills[0].name
+            if skill_name not in valid_names:
+                return RoutingDecision(
+                    skill_name="", confidence=0.0,
+                    rationale=f"LLM returned unknown skill '{skill_name}'",
+                    latency_ms=latency_ms,
+                )
             return RoutingDecision(
                 skill_name=skill_name,
                 confidence=float(data.get("confidence", 0.8)),
@@ -187,10 +305,9 @@ class LLMRouter:
                 latency_ms=latency_ms,
             )
         except (json.JSONDecodeError, ValueError, KeyError):
-            fallback = skills[0].name if skills else ""
             return RoutingDecision(
-                skill_name=fallback, confidence=0.3,
-                rationale=f"LLM response parsing failed; falling back to {fallback}",
+                skill_name="", confidence=0.0,
+                rationale="LLM response parsing failed",
                 latency_ms=latency_ms,
             )
 
@@ -230,7 +347,12 @@ class CompositeRouter:
         )
 
     def health(self) -> tuple[bool, str]:
-        return True, f"CompositeRouter: {len(self._tiers)} tier(s)"
+        if not self._tiers:
+            return False, "CompositeRouter: no tiers configured"
+        statuses = [router.health() for router, _ in self._tiers]
+        all_ok = all(ok for ok, _ in statuses)
+        summary = ", ".join(msg for _, msg in statuses)
+        return all_ok, f"CompositeRouter: {len(self._tiers)} tier(s); {summary}"
 
 
 # -- Routing evaluation --------------------------------------------------------
@@ -261,6 +383,7 @@ class RoutingJudge:
 # -- Orchestration function ---------------------------------------------------
 
 
+@traced(name="router_run_routed_turn", span_type="CHAIN")
 def run_routed_turn(
     query: str,
     session_id: str,

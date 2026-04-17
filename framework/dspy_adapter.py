@@ -79,12 +79,7 @@ class DatabricksRetriever:
 
     def __call__(self, query: str, k: int = 5, **kwargs: Any) -> list[Any]:
         result = self._vs.retrieve(query, top_k=k)
-        passages = []
-        for row in result.rows:
-            # Column index 6 is 'content' per vector_search_utils.py column order
-            content = row[6] if len(row) > 6 else str(row)
-            passages.append(dspy.Prediction(long_text=content))
-        return passages
+        return [dspy.Prediction(long_text=row.content) for row in result.rows]
 
     def health(self) -> tuple[bool, str]:
         return self._vs.health()

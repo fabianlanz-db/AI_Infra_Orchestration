@@ -9,9 +9,12 @@ agent runtime can discover them alongside native skills.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from framework.skill_registry import (
     SkillClient,
@@ -118,6 +121,7 @@ class MCPCatalogClient:
         """
         path = Path(path)
         if not path.exists():
+            logger.warning("MCP config file not found at %s; no servers imported", path)
             return 0
         data = json.loads(path.read_text(encoding="utf-8"))
         servers = data.get("mcpServers", {})

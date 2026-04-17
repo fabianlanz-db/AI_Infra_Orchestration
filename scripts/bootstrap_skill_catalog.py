@@ -95,4 +95,6 @@ def bootstrap(mcp_json_path: str = ".cursor/mcp.json") -> dict:
 
 
 if __name__ == "__main__":
-    bootstrap()
+    summary = bootstrap()
+    if summary.get("errors"):
+        sys.exit(1)

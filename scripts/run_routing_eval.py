@@ -19,10 +19,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from framework.judge_hooks import JudgeInput
 from framework.router import (
     CompositeRouter,
+    LexicalRouter,
     RoutingContext,
     RoutingJudge,
     RuleBasedRouter,
-    SemanticRouter,
 )
 from framework.skill_registry import SkillRegistry
 
@@ -90,7 +90,7 @@ def run_eval() -> dict:
         (r"\b(search|find|retrieve|documents?|knowledge)\b", "vector-search"),
         (r"\b(history|session|remember|discussed|conversation)\b", "memory-read"),
     ]), min_confidence=0.9)
-    router.add_tier(SemanticRouter(min_confidence=0.1), min_confidence=0.3)
+    router.add_tier(LexicalRouter(min_confidence=0.1), min_confidence=0.3)
 
     context = RoutingContext(available_skills=registry.list_skills())
     judge = RoutingJudge()
