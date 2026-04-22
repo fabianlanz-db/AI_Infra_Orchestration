@@ -1,15 +1,27 @@
 """
 Generate synthetic AI infrastructure demo data in Unity Catalog.
+
+Required environment variables (no defaults — fails fast if missing):
+  DEMO_CATALOG, DEMO_SCHEMA
 """
 
 import os
+import sys
 
 from databricks import sql
 from databricks.sdk import WorkspaceClient
 
 
-CATALOG = os.environ.get("DEMO_CATALOG", "fl_demos")
-SCHEMA = os.environ.get("DEMO_SCHEMA", "ai_infra_agent_demo")
+_missing = [n for n in ("DEMO_CATALOG", "DEMO_SCHEMA") if not os.environ.get(n)]
+if _missing:
+    sys.exit(
+        "Missing required environment variables: "
+        + ", ".join(_missing)
+        + ". Set DEMO_CATALOG and DEMO_SCHEMA before running."
+    )
+
+CATALOG = os.environ["DEMO_CATALOG"]
+SCHEMA = os.environ["DEMO_SCHEMA"]
 
 
 SQL_CONTENT = f"""

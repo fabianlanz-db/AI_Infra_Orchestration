@@ -2,9 +2,13 @@
 Bootstrap Databricks resources for the AI Infra Orchestration demo.
 
 Creates/updates:
-- UC schema and synthetic Delta tables (configurable via DEMO_CATALOG / DEMO_SCHEMA)
+- UC schema and synthetic Delta tables
 - Vector Search endpoint + Delta Sync index
 - Lakebase Autoscaling project
+
+Required environment variables (no defaults — fails fast if missing):
+  DEMO_CATALOG, DEMO_SCHEMA, DEMO_VS_ENDPOINT, DEMO_VS_INDEX_NAME,
+  DEMO_LAKEBASE_PROJECT_ID, DEMO_LAKEBASE_DISPLAY_NAME
 
 Idempotent: safe to re-run. Pass ``--force-tables`` to recreate the Delta
 tables; without it, existing tables are preserved.
@@ -13,6 +17,7 @@ tables; without it, existing tables are preserved.
 import argparse
 import logging
 import os
+import sys
 
 from databricks import sql
 from databricks.sdk import WorkspaceClient
@@ -29,14 +34,30 @@ from databricks.sdk.service.vectorsearch import (
 logger = logging.getLogger(__name__)
 
 
-CATALOG = os.environ.get("DEMO_CATALOG", "fl_demos")
-SCHEMA = os.environ.get("DEMO_SCHEMA", "ai_infra_agent_demo")
-VS_ENDPOINT = os.environ.get("DEMO_VS_ENDPOINT", "ai_infra_agent_vs_ep")
-VS_INDEX_NAME = os.environ.get("DEMO_VS_INDEX_NAME", "ai_infra_kb_index")
+REQUIRED_ENV = [
+    "DEMO_CATALOG",
+    "DEMO_SCHEMA",
+    "DEMO_VS_ENDPOINT",
+    "DEMO_VS_INDEX_NAME",
+    "DEMO_LAKEBASE_PROJECT_ID",
+    "DEMO_LAKEBASE_DISPLAY_NAME",
+]
+_missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
+if _missing:
+    sys.exit(
+        "Missing required environment variables: "
+        + ", ".join(_missing)
+        + ". Set all of " + ", ".join(REQUIRED_ENV) + " before running."
+    )
+
+CATALOG = os.environ["DEMO_CATALOG"]
+SCHEMA = os.environ["DEMO_SCHEMA"]
+VS_ENDPOINT = os.environ["DEMO_VS_ENDPOINT"]
+VS_INDEX_NAME = os.environ["DEMO_VS_INDEX_NAME"]
 VS_INDEX = f"{CATALOG}.{SCHEMA}.{VS_INDEX_NAME}"
 SOURCE_TABLE = f"{CATALOG}.{SCHEMA}.ai_infra_kb_chunks"
-LAKEBASE_PROJECT_ID = os.environ.get("DEMO_LAKEBASE_PROJECT_ID", "ai-infra-agent-db")
-LAKEBASE_DISPLAY_NAME = os.environ.get("DEMO_LAKEBASE_DISPLAY_NAME", "External Agent DB")
+LAKEBASE_PROJECT_ID = os.environ["DEMO_LAKEBASE_PROJECT_ID"]
+LAKEBASE_DISPLAY_NAME = os.environ["DEMO_LAKEBASE_DISPLAY_NAME"]
 
 
 SCHEMA_DDL = f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA};"
