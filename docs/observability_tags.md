@@ -1,11 +1,11 @@
 # Observability Tag Schema
 
 Stable contract for MLflow trace tags emitted by the framework. Downstream
-consumers (Databricks Agent Control Plane, custom dashboards, evaluation
-jobs) can rely on these keys and values being consistent across versions.
+consumers (observability dashboards, evaluation jobs, monitoring tools)
+can rely on these keys and values being consistent across versions.
 
 All tags are attached at **trace level** via `mlflow.update_current_trace`,
-not span level — ACP and similar tools query at trace granularity.
+not span level — most dashboard tools query at trace granularity.
 
 Tagging is **best-effort**: when no active trace is present or the MLflow
 backend is unreachable, tag helpers log at `DEBUG` and return silently.
@@ -82,11 +82,11 @@ Emitted by `DatabricksMCPClient.ainvoke_tool` on every MCP tool call.
 Additions are backward-compatible. **Removing** or **renaming** a key is a
 breaking change and will be called out in release notes.
 
-## Relation to ACP
+## Downstream consumers
 
-Databricks Agent Control Plane reads MLflow experiments from
-`system.mlflow.runs_latest` and related system tables. Traces with these
-tags attached can be filtered and aggregated in ACP dashboards to:
+Dashboards and monitoring tools that read MLflow traces from the tracking
+backend (via the MLflow API or Databricks system tables such as
+`system.mlflow.runs_latest`) can filter and aggregate on these tags to:
 
 - Attribute cost and latency to specific agents (`agent.id`, `agent.framework`)
 - Compare router-tier hit rates (`routing.tier`, `routing.confidence`)

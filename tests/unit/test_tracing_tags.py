@@ -1,4 +1,4 @@
-"""Unit tests for the observability tag schema (Part A of ACP integration).
+"""Unit tests for the observability tag schema.
 
 Covers AgentContext, set_*_tags helpers, header serdes, and the context-manager
 helper. Router and orchestrator tagging are covered in test_router.py and
@@ -86,7 +86,7 @@ def test_extract_agent_turn_context_handles_missing():
     assert extract_agent_turn_context({})[0] is None
 
 
-# --- Tag setters (verify the exact keys that ACP will read) ------------------
+# --- Tag setters (verify the exact keys dashboards will read) ---------------
 
 @patch("framework.mlflow_tracing_utils.mlflow.update_current_trace")
 def test_set_agent_tags_emits_agent_namespace(mock_apply):

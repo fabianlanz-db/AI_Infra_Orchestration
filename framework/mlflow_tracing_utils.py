@@ -72,8 +72,9 @@ def extract_trace_context_headers(headers: dict[str, str] | None) -> dict[str, s
 
 # --- Observability tag schema ------------------------------------------------
 #
-# Stable tag namespaces for ACP / dashboards / any downstream consumer of
-# MLflow traces. Keep keys in sync with docs/observability_tags.md.
+# Stable tag namespaces for observability dashboards and downstream
+# consumers of MLflow traces. Keep keys in sync with
+# docs/observability_tags.md.
 #
 #   agent.*    identity of the caller (in-workspace or external)
 #   routing.*  router decision metadata

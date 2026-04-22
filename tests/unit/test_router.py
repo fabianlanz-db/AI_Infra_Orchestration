@@ -156,9 +156,9 @@ def test_llm_router_parse_failure_returns_empty():
     assert decision.confidence == 0.0
 
 
-# --- Observability tag emission (Part A of ACP integration) ------------------
+# --- Observability tag emission ---------------------------------------------
 # These tests verify that routers emit routing.* tags with the correct tier_name
-# so ACP / dashboards can pivot traffic by tier.
+# so dashboards can pivot traffic by tier.
 
 from unittest.mock import patch  # noqa: E402
 

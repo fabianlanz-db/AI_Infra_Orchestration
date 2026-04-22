@@ -101,10 +101,11 @@ if you need it.
 same binding is safe — it overwrites the existing definition.
 `publish_bindings` is a thin batch wrapper over `publish_skill`.
 
-## Relation to ACP
+## Governance surface
 
-UC Functions published via this module show up in ACP's tool registry
-view alongside Databricks-native UC functions. Invocations through the
-Managed Functions MCP endpoint are billed/attributed to the invoker's
-principal via `system.billing.usage` and `system.access.audit` — the
-same path ACP already queries for cost and audit attribution.
+Published UC Functions inherit all standard Unity Catalog governance:
+permission grants, lineage tracking, and usage attribution through
+`system.billing.usage` and `system.access.audit`. Invocations through the
+Managed Functions MCP endpoint are billed and attributed to the invoker's
+principal — the same path any Databricks-native cost or audit dashboard
+reads from.

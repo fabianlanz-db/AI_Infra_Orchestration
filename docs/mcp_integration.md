@@ -112,7 +112,8 @@ there rather than at the first tool invocation.
 Every invocation emits `mcp.*` trace tags — see
 [`observability_tags.md`](./observability_tags.md) for the schema. Pair
 with `set_agent_tags(AgentContext(...))` at the start of your agent turn
-so ACP can attribute the MCP call to a specific agent identity.
+so downstream monitoring can attribute the MCP call to a specific agent
+identity.
 
 ## Limitations
 

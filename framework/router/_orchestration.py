@@ -65,8 +65,8 @@ def run_routed_turn(
 ) -> RoutedTurnResult:
     """Route query -> select skill -> execute -> optionally persist.
 
-    Pass ``agent_context`` to tag the trace with agent identity so ACP and
-    downstream dashboards can attribute the turn to its caller.
+    Pass ``agent_context`` to tag the trace with agent identity so
+    observability tools and dashboards can attribute the turn to its caller.
     """
     if agent_context is not None:
         set_agent_tags(agent_context)

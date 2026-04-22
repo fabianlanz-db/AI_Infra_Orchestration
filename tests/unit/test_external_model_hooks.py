@@ -22,7 +22,7 @@ def test_extract_by_path_invalid_index_raises():
         _extract_by_path({"a": [1]}, "a.5")
 
 
-# --- agent_context propagation (Part A of ACP integration) -------------------
+# --- agent_context propagation ----------------------------------------------
 
 from unittest.mock import patch  # noqa: E402
 
