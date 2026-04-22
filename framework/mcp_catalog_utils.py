@@ -10,29 +10,16 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
-from framework.skill_registry import (
-    SkillClient,
-    SkillDefinition,
-    SkillInput,
-    SkillRegistry,
-    SkillResult,
-)
+from framework.skill_registry import SkillRegistry
 
 if TYPE_CHECKING:
     from framework.mcp_client import DatabricksMCPClient
-
-
-# A skill-side invoker: given a SkillInput, returns the MCPToolResult from
-# the server. Used to inject the transport layer into _MCPToolSkill so the
-# catalog stays decoupled from the mcp SDK.
-_ToolInvoker = Callable[[SkillInput], "MCPToolResult"]
 
 
 @dataclass
@@ -171,6 +158,52 @@ class MCPCatalogClient:
             count += 1
         return count
 
+    def discover_tools(
+        self,
+        server_name: str | None = None,
+        client: DatabricksMCPClient | None = None,
+    ) -> int:
+        """Query registered (enabled) servers for their tool lists.
+
+        Calls the standard MCP ``list_tools`` RPC against each server URL
+        via the supplied or attached :class:`DatabricksMCPClient`, and
+        populates the catalog via :meth:`register_tool` (deduped by name).
+
+        ``server_name`` restricts discovery to one server. ``client``
+        overrides the catalog's attached client for this call.
+
+        Returns the number of tools newly added (existing tools are not
+        counted again).
+        """
+        invoker = client or self._client
+        if invoker is None:
+            raise RuntimeError(
+                "discover_tools requires a DatabricksMCPClient — attach one "
+                "via set_client() or pass client=...",
+            )
+        if server_name is not None:
+            server = self._servers.get(server_name)
+            if server is None:
+                raise KeyError(f"Server {server_name!r} not registered")
+            servers = [server] if server.enabled else []
+        else:
+            servers = [s for s in self._servers.values() if s.enabled]
+
+        added = 0
+        for server in servers:
+            if not server.url:
+                logger.warning(
+                    "Server %s has no URL; skipping tool discovery", server.name,
+                )
+                continue
+            existing = {t.name for t in self._tools.get(server.name, [])}
+            for tool in invoker.list_tools(server.url):
+                tool.server_name = server.name
+                self.register_tool(tool)
+                if tool.name not in existing:
+                    added += 1
+        return added
+
     def sync_to_skill_registry(self, registry: SkillRegistry) -> int:
         """Bridge all MCP tools into a SkillRegistry as ``source='mcp'`` skills.
 
@@ -179,6 +212,8 @@ class MCPCatalogClient:
 
         Returns the number of skills registered.
         """
+        from framework.mcp_tool_skill import _MCPToolSkill  # local to avoid cycle
+
         count = 0
         for tool in self.list_tools():
             server = self._servers.get(tool.server_name)
@@ -191,15 +226,18 @@ class MCPCatalogClient:
 
     def _make_invoker(
         self, tool: MCPToolDefinition, server: MCPServerConfig,
-    ) -> _ToolInvoker:
+    ) -> "_ToolInvoker":
         """Close over (client, server, tool) to produce a per-skill invoker.
 
         Enforces auth/server-type compatibility at registration time
         (e.g. custom MCP rejects PAT per the Databricks docs) so misconfig
         fails loudly here rather than at the first tool call.
         """
+        # Local imports avoid cycles between mcp_catalog_utils and mcp_client /
+        # mcp_tool_skill.
         from framework.mcp_auth import ensure_auth_compatible_with_server
-        from framework.mcp_client import MCPInvocation  # local import to avoid cycle
+        from framework.mcp_client import MCPInvocation
+        from framework.skill_registry import SkillInput
 
         client = self._client
         assert client is not None  # caller guards
@@ -240,56 +278,5 @@ class MCPCatalogClient:
         return {"server_count": len(servers), "servers": servers, "tools": tools}
 
 
-class _MCPToolSkill:
-    """Internal adapter: wraps an MCPToolDefinition as a SkillClient.
-
-    If constructed with ``invoke_fn``, ``execute()`` dispatches to it (the
-    catalog builds these once a DatabricksMCPClient is attached). Without an
-    invoker, ``execute()`` raises — the catalog is pure metadata.
-    """
-
-    def __init__(
-        self,
-        tool: MCPToolDefinition,
-        invoke_fn: _ToolInvoker | None = None,
-    ) -> None:
-        self._tool = tool
-        self._invoke = invoke_fn
-
-    @property
-    def name(self) -> str:
-        return f"mcp:{self._tool.server_name}:{self._tool.name}"
-
-    @property
-    def definition(self) -> SkillDefinition:
-        return SkillDefinition(
-            name=self.name,
-            description=self._tool.description or f"MCP tool {self._tool.name}",
-            tags=["mcp", self._tool.server_name],
-            input_schema=self._tool.input_schema,
-            source="mcp",
-            mcp_server=self._tool.server_name,
-        )
-
-    def execute(self, input: SkillInput) -> SkillResult:
-        if self._invoke is None:
-            raise NotImplementedError(
-                f"MCP tool '{self._tool.name}' on server '{self._tool.server_name}' "
-                f"has no invoker. Attach a DatabricksMCPClient via "
-                f"MCPCatalogClient.set_client() before sync_to_skill_registry()."
-            )
-        tool_result = self._invoke(input)
-        return SkillResult(
-            output=tool_result.output,
-            latency_ms=tool_result.latency_ms,
-            skill_name=self.name,
-            metadata={
-                "mcp_server": self._tool.server_name,
-                "mcp_tool": self._tool.name,
-            },
-        )
-
-    def health(self) -> tuple[bool, str]:
-        if self._invoke is None:
-            return True, f"MCP tool {self._tool.name} registered (metadata only)"
-        return True, f"MCP tool {self._tool.name} registered and executable"
+# _MCPToolSkill has moved to framework.mcp_tool_skill to keep this module
+# under the 300-line gate. sync_to_skill_registry imports it locally.
