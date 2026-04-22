@@ -18,3 +18,12 @@ __pycache__/
 !.cursor/skills/ai-infra-mlflow-tracing-hooks/SKILL.md
 .ai-dev-kit/
 .gh/
+
+# Local MLflow SQLite artifact (created by tests / local runs)
+mlflow.db
+mlruns/
+
+# Python packaging / build artifacts
+build/
+dist/
+*.egg-info/

@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-orchestration-framework"
+version = "0.1.0"
+description = "Databricks-first reference architecture connecting AI agent runtimes (DSPy, LangGraph, external services) to governed Databricks infrastructure: Vector Search, Lakebase memory, Foundation Model Serving, MLflow tracing, Unity Catalog skills, and AI Gateway-governed MCP."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Fabian Lanz" }]
+keywords = ["databricks", "ai-agents", "mcp", "mlflow", "agent-orchestration", "ai-gateway"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Core runtime dependencies — every framework import path needs these.
+dependencies = [
+    "databricks-sdk>=0.40",
+    "databricks-sql-connector>=3.0",
+    "mlflow>=3.0",
+    "httpx>=0.27",
+    "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+# Databricks AI Gateway-governed MCP client (framework.mcp_client).
+# Required for any agent that invokes MCP tools through this framework.
+mcp = ["mcp>=1.0"]
+
+# DSPy agent adapter (framework.dspy_adapter).
+dspy = ["dspy-ai>=2.5"]
+
+# LangGraph agent adapter (framework.langgraph_adapter).
+langgraph = ["langgraph>=0.2", "langchain-core>=0.3"]
+
+# Streamlit demo app (apps/ai_infra_showcase_app).
+app = ["streamlit>=1.50"]
+
+# Development tooling.
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+# Meta-extra: install everything (useful for local dev).
+all = [
+    "mcp>=1.0",
+    "dspy-ai>=2.5",
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "streamlit>=1.50",
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Documentation = "https://github.com/fabian-lanz/AI_Orchestration#readme"
+Repository = "https://github.com/fabian-lanz/AI_Orchestration"
+
+[tool.hatch.build.targets.wheel]
+packages = ["framework"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle + pyflakes
+    "I",             # isort
+    "B",             # bugbear
+    "UP",            # pyupgrade
+]
+ignore = [
+    "E501",  # line-too-long — handled by formatter
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
