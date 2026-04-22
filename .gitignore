@@ -5,17 +5,7 @@ __pycache__/
 .env
 .env.*
 .databricks-resources.json
-.cursor/*
-!.cursor/skills/
-.cursor/skills/*
-!.cursor/skills/ai-infra-external-model-hooks/
-!.cursor/skills/ai-infra-external-model-hooks/SKILL.md
-!.cursor/skills/ai-infra-vector-search-hooks/
-!.cursor/skills/ai-infra-vector-search-hooks/SKILL.md
-!.cursor/skills/ai-infra-lakebase-memory-hooks/
-!.cursor/skills/ai-infra-lakebase-memory-hooks/SKILL.md
-!.cursor/skills/ai-infra-mlflow-tracing-hooks/
-!.cursor/skills/ai-infra-mlflow-tracing-hooks/SKILL.md
+.cursor/
 .ai-dev-kit/
 .gh/
 
