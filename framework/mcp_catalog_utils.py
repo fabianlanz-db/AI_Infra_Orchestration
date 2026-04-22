@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +25,28 @@ from framework.skill_registry import (
     SkillResult,
 )
 
+if TYPE_CHECKING:
+    from framework.mcp_client import DatabricksMCPClient
+
+
+# A skill-side invoker: given a SkillInput, returns the MCPToolResult from
+# the server. Used to inject the transport layer into _MCPToolSkill so the
+# catalog stays decoupled from the mcp SDK.
+_ToolInvoker = Callable[[SkillInput], "MCPToolResult"]
+
 
 @dataclass
 class MCPServerConfig:
-    """Configuration for an MCP server (managed, custom, or external)."""
+    """Configuration for an MCP server (managed, custom, or external).
+
+    ``url`` is the HTTP endpoint used by ``DatabricksMCPClient`` for Streamable
+    HTTP invocation against AI Gateway-governed servers. ``command``/``args``
+    remain for legacy stdio-style configs imported from ``.cursor/mcp.json``.
+    """
 
     name: str
     server_type: str  # "managed" | "custom" | "external"
+    url: str = ""
     command: str = ""
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -74,6 +90,17 @@ class MCPCatalogClient:
     def __init__(self) -> None:
         self._servers: dict[str, MCPServerConfig] = {}
         self._tools: dict[str, list[MCPToolDefinition]] = {}
+        self._client: DatabricksMCPClient | None = None
+
+    def set_client(self, client: DatabricksMCPClient) -> None:
+        """Attach an MCP client for tool invocation.
+
+        After calling this, ``sync_to_skill_registry`` will produce skills
+        whose ``execute()`` method dispatches to the client. Without a client
+        attached, skills raise ``NotImplementedError`` on execute — the catalog
+        remains pure metadata.
+        """
+        self._client = client
 
     def register_server(self, config: MCPServerConfig) -> None:
         """Add or update an MCP server in the catalog."""
@@ -147,6 +174,9 @@ class MCPCatalogClient:
     def sync_to_skill_registry(self, registry: SkillRegistry) -> int:
         """Bridge all MCP tools into a SkillRegistry as ``source='mcp'`` skills.
 
+        If a client is attached via :meth:`set_client`, registered skills are
+        executable. Otherwise they raise ``NotImplementedError`` on execute.
+
         Returns the number of skills registered.
         """
         count = 0
@@ -154,10 +184,32 @@ class MCPCatalogClient:
             server = self._servers.get(tool.server_name)
             if server and not server.enabled:
                 continue
-            skill = _MCPToolSkill(tool=tool)
-            registry.register(skill)
+            invoker = self._make_invoker(tool, server) if (server and self._client) else None
+            registry.register(_MCPToolSkill(tool=tool, invoke_fn=invoker))
             count += 1
         return count
+
+    def _make_invoker(
+        self, tool: MCPToolDefinition, server: MCPServerConfig,
+    ) -> _ToolInvoker:
+        """Close over (client, server, tool) to produce a per-skill invoker."""
+        from framework.mcp_client import MCPInvocation  # local import to avoid cycle
+
+        client = self._client
+        assert client is not None  # caller guards
+
+        def invoke(skill_input: SkillInput) -> MCPToolResult:
+            return client.invoke_tool(
+                MCPInvocation(
+                    server=server.name,
+                    server_type=server.server_type,
+                    server_url=server.url,
+                    tool=tool.name,
+                    arguments=skill_input.parameters,
+                ),
+            )
+
+        return invoke
 
     def health(self) -> tuple[bool, str]:
         server_count = len(self._servers)
@@ -182,10 +234,20 @@ class MCPCatalogClient:
 
 
 class _MCPToolSkill:
-    """Internal adapter: wraps an MCPToolDefinition as a SkillClient."""
+    """Internal adapter: wraps an MCPToolDefinition as a SkillClient.
 
-    def __init__(self, tool: MCPToolDefinition) -> None:
+    If constructed with ``invoke_fn``, ``execute()`` dispatches to it (the
+    catalog builds these once a DatabricksMCPClient is attached). Without an
+    invoker, ``execute()`` raises — the catalog is pure metadata.
+    """
+
+    def __init__(
+        self,
+        tool: MCPToolDefinition,
+        invoke_fn: _ToolInvoker | None = None,
+    ) -> None:
         self._tool = tool
+        self._invoke = invoke_fn
 
     @property
     def name(self) -> str:
@@ -203,10 +265,24 @@ class _MCPToolSkill:
         )
 
     def execute(self, input: SkillInput) -> SkillResult:
-        raise NotImplementedError(
-            f"MCP tool '{self._tool.name}' on server '{self._tool.server_name}' "
-            f"cannot be executed directly. Use an MCP client runtime to invoke it."
+        if self._invoke is None:
+            raise NotImplementedError(
+                f"MCP tool '{self._tool.name}' on server '{self._tool.server_name}' "
+                f"has no invoker. Attach a DatabricksMCPClient via "
+                f"MCPCatalogClient.set_client() before sync_to_skill_registry()."
+            )
+        tool_result = self._invoke(input)
+        return SkillResult(
+            output=tool_result.output,
+            latency_ms=tool_result.latency_ms,
+            skill_name=self.name,
+            metadata={
+                "mcp_server": self._tool.server_name,
+                "mcp_tool": self._tool.name,
+            },
         )
 
     def health(self) -> tuple[bool, str]:
-        return True, f"MCP tool {self._tool.name} registered (invocation requires MCP runtime)"
+        if self._invoke is None:
+            return True, f"MCP tool {self._tool.name} registered (metadata only)"
+        return True, f"MCP tool {self._tool.name} registered and executable"
