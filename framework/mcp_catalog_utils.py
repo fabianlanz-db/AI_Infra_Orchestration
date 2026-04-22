@@ -192,11 +192,18 @@ class MCPCatalogClient:
     def _make_invoker(
         self, tool: MCPToolDefinition, server: MCPServerConfig,
     ) -> _ToolInvoker:
-        """Close over (client, server, tool) to produce a per-skill invoker."""
+        """Close over (client, server, tool) to produce a per-skill invoker.
+
+        Enforces auth/server-type compatibility at registration time
+        (e.g. custom MCP rejects PAT per the Databricks docs) so misconfig
+        fails loudly here rather than at the first tool call.
+        """
+        from framework.mcp_auth import ensure_auth_compatible_with_server
         from framework.mcp_client import MCPInvocation  # local import to avoid cycle
 
         client = self._client
         assert client is not None  # caller guards
+        ensure_auth_compatible_with_server(client.auth_mode, server.server_type)
 
         def invoke(skill_input: SkillInput) -> MCPToolResult:
             return client.invoke_tool(

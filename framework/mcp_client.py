@@ -81,6 +81,15 @@ class DatabricksMCPClient:
         self._session_factory = session_factory
         self._timeout = timeout_seconds
 
+    @property
+    def auth_mode(self) -> str:
+        """Label for ``mcp.auth_mode`` tagging and compat checks.
+
+        Returns ``"byo"`` when a ``session_factory`` is supplied instead of
+        ``auth``; otherwise delegates to the ``MCPAuth`` implementation.
+        """
+        return self._auth.mode() if self._auth else "byo"
+
     # ---- Sync entry points -------------------------------------------------
 
     def invoke_tool(self, invocation: MCPInvocation) -> MCPToolResult:
@@ -95,7 +104,7 @@ class DatabricksMCPClient:
 
     async def ainvoke_tool(self, invocation: MCPInvocation) -> MCPToolResult:
         start = time.perf_counter()
-        auth_mode = self._auth.mode() if self._auth else "byo"
+        auth_mode = self.auth_mode
         async with self._session(invocation.server_url) as session:
             response = await session.call_tool(
                 invocation.tool,
