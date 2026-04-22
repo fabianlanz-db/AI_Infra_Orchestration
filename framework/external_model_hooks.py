@@ -26,7 +26,11 @@ import httpx
 
 from framework.fm_agent_utils import FmResponse
 from framework.lakebase_utils import LakebaseMemoryStore
-from framework.mlflow_tracing_utils import build_trace_context_headers
+from framework.mlflow_tracing_utils import (
+    AgentContext,
+    build_trace_context_headers,
+    set_agent_tags,
+)
 from framework.vector_search_utils import VectorSearchClient, build_external_retrieval_payload
 
 
@@ -200,6 +204,7 @@ def run_external_agent_turn(
     memory_store: LakebaseMemoryStore | None = None,
     top_k: int = 5,
     trace_id: str | None = None,
+    agent_context: AgentContext | None = None,
 ) -> ExternalAgentTurnResult:
     """
     Reference orchestration hook for external model APIs.
@@ -209,7 +214,13 @@ def run_external_agent_turn(
     2) Call external model API through adapter contract.
     3) Persist conversation turn in Lakebase.
     4) Return structured payloads for logging/telemetry.
+
+    Pass ``agent_context`` to tag the trace with agent identity. For external
+    (non-Databricks) callers, reconstruct it via
+    :func:`framework.mlflow_tracing_utils.agent_context_from_headers`.
     """
+    if agent_context is not None:
+        set_agent_tags(agent_context)
     vector = vector_client or VectorSearchClient()
     memory = memory_store or LakebaseMemoryStore()
     retrieval = vector.retrieve(query, top_k=top_k)

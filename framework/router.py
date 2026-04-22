@@ -17,7 +17,13 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from framework.judge_hooks import JudgeInput, JudgeVerdict
 
-from framework.mlflow_tracing_utils import traced
+from framework.mlflow_tracing_utils import (
+    AgentContext,
+    set_agent_tags,
+    set_routing_tags,
+    set_skill_tags,
+    traced,
+)
 from framework.skill_registry import (
     SkillDefinition,
     SkillInput,
@@ -25,6 +31,14 @@ from framework.skill_registry import (
     SkillResult,
     keyword_score,
 )
+
+
+def _tier_name_of(router: object) -> str:
+    """Extract a tier name for tagging; falls back to the class name."""
+    name = getattr(router, "tier_name", None)
+    if isinstance(name, str) and name:
+        return name
+    return router.__class__.__name__.lower().replace("router", "") or "custom"
 
 
 @dataclass
@@ -101,6 +115,7 @@ class RuleBasedRouter:
         rules: list[tuple] | None = None,
         default_skill: str = "generate",
         default_rule_confidence: float = 1.0,
+        tier_name: str = "rule",
     ) -> None:
         self._rules: list[tuple[re.Pattern[str], str, float]] = []
         for rule in rules or []:
@@ -113,23 +128,28 @@ class RuleBasedRouter:
                 raise ValueError(f"Rule must be 2- or 3-tuple, got {rule!r}")
             self._rules.append((re.compile(pattern, re.IGNORECASE), skill, float(confidence)))
         self._default = default_skill
+        self.tier_name = tier_name
 
     def route(self, query: str, context: RoutingContext) -> RoutingDecision:
         start = time.perf_counter()
         for pattern, skill_name, confidence in self._rules:
             if pattern.search(query):
-                return RoutingDecision(
+                decision = RoutingDecision(
                     skill_name=skill_name,
                     confidence=confidence,
                     rationale=f"Matched rule pattern: {pattern.pattern}",
                     latency_ms=int((time.perf_counter() - start) * 1000),
                 )
-        return RoutingDecision(
+                set_routing_tags(decision, self.tier_name)
+                return decision
+        decision = RoutingDecision(
             skill_name=self._default,
             confidence=0.5,
             rationale=f"No rule matched; defaulting to {self._default}",
             latency_ms=int((time.perf_counter() - start) * 1000),
         )
+        set_routing_tags(decision, self.tier_name)
+        return decision
 
     def health(self) -> tuple[bool, str]:
         return True, f"RuleBasedRouter: {len(self._rules)} rule(s)"
@@ -142,28 +162,33 @@ class LexicalRouter:
     ``EmbeddingRouter`` for true semantic matching via an embedding model.
     """
 
-    def __init__(self, min_confidence: float = 0.1) -> None:
+    def __init__(self, min_confidence: float = 0.1, tier_name: str = "lexical") -> None:
         self._min_confidence = min_confidence
+        self.tier_name = tier_name
 
     def route(self, query: str, context: RoutingContext) -> RoutingDecision:
         start = time.perf_counter()
         skills = context.available_skills
         if not skills:
-            return RoutingDecision(
+            decision = RoutingDecision(
                 skill_name="", confidence=0.0, rationale="No skills available",
                 latency_ms=int((time.perf_counter() - start) * 1000),
             )
+            set_routing_tags(decision, self.tier_name)
+            return decision
         scored = sorted(
             [(s, keyword_score(query, s)) for s in skills],
             key=lambda p: p[1], reverse=True,
         )
         best_skill, best_score = scored[0]
         if best_score == 0.0:
-            return RoutingDecision(
+            decision = RoutingDecision(
                 skill_name="", confidence=0.0,
                 rationale="No keyword overlap with any skill",
                 latency_ms=int((time.perf_counter() - start) * 1000),
             )
+            set_routing_tags(decision, self.tier_name)
+            return decision
         alternatives = [s.name for s, sc in scored[1:3] if sc > 0]
         conf = min(1.0, best_score)
         below = best_score < self._min_confidence
@@ -171,10 +196,12 @@ class LexicalRouter:
             f"Below threshold ({best_score:.2f} < {self._min_confidence})" if below
             else f"Lexical match {best_score:.2f} for '{best_skill.name}'"
         )
-        return RoutingDecision(
+        decision = RoutingDecision(
             skill_name=best_skill.name, confidence=conf, rationale=rationale,
             alternatives=alternatives, latency_ms=int((time.perf_counter() - start) * 1000),
         )
+        set_routing_tags(decision, self.tier_name)
+        return decision
 
     def health(self) -> tuple[bool, str]:
         return True, "LexicalRouter active"
@@ -197,11 +224,13 @@ class EmbeddingRouter:
         self,
         embedder: Any,
         min_confidence: float = 0.25,
+        tier_name: str = "embedding",
     ) -> None:
         self._embedder = embedder
         self._min_confidence = min_confidence
         self._cache_key: tuple[str, ...] = ()
         self._cached_vectors: list[list[float]] = []
+        self.tier_name = tier_name
 
     @staticmethod
     def _cosine(a: list[float], b: list[float]) -> float:
@@ -226,10 +255,12 @@ class EmbeddingRouter:
         start = time.perf_counter()
         skills = context.available_skills
         if not skills:
-            return RoutingDecision(
+            decision = RoutingDecision(
                 skill_name="", confidence=0.0, rationale="No skills available",
                 latency_ms=int((time.perf_counter() - start) * 1000),
             )
+            set_routing_tags(decision, self.tier_name)
+            return decision
         self._ensure_cached(skills)
         [query_vec] = self._embedder([query])
         scored = sorted(
@@ -240,7 +271,7 @@ class EmbeddingRouter:
         latency_ms = int((time.perf_counter() - start) * 1000)
         passed = best_score >= self._min_confidence
         alternatives = [s.name for s, sc in scored[1:3] if sc > 0]
-        return RoutingDecision(
+        decision = RoutingDecision(
             skill_name=best_skill.name if passed else "",
             confidence=max(0.0, min(1.0, best_score)),
             rationale=(
@@ -250,6 +281,8 @@ class EmbeddingRouter:
             alternatives=alternatives,
             latency_ms=latency_ms,
         )
+        set_routing_tags(decision, self.tier_name)
+        return decision
 
     def health(self) -> tuple[bool, str]:
         return True, "EmbeddingRouter active"
@@ -258,8 +291,9 @@ class EmbeddingRouter:
 class LLMRouter:
     """LLM-based router using an FM endpoint for intent classification."""
 
-    def __init__(self, fm_client: Any) -> None:
+    def __init__(self, fm_client: Any, tier_name: str = "llm") -> None:
         self._fm = fm_client
+        self.tier_name = tier_name
 
     def route(self, query: str, context: RoutingContext) -> RoutingDecision:
         start = time.perf_counter()
@@ -281,7 +315,9 @@ class LLMRouter:
             system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.0,
         )
         latency_ms = int((time.perf_counter() - start) * 1000)
-        return self._parse_response(response.text, skills, latency_ms)
+        decision = self._parse_response(response.text, skills, latency_ms)
+        set_routing_tags(decision, self.tier_name)
+        return decision
 
     def _parse_response(
         self, text: str, skills: list[SkillDefinition], latency_ms: int,
@@ -331,15 +367,21 @@ class CompositeRouter:
     def route(self, query: str, context: RoutingContext) -> RoutingDecision:
         start = time.perf_counter()
         last_decision: RoutingDecision | None = None
+        last_router: RouterClient | None = None
         for router, threshold in self._tiers:
             last_decision = router.route(query, context)
+            last_router = router
             if last_decision.confidence >= threshold:
                 last_decision.latency_ms = int((time.perf_counter() - start) * 1000)
+                # Re-tag so the trace reflects composite-adjusted latency, not the
+                # tier's internal latency. The winning tier's name is preserved.
+                set_routing_tags(last_decision, _tier_name_of(router))
                 return last_decision
         total_ms = int((time.perf_counter() - start) * 1000)
-        if last_decision:
+        if last_decision and last_router:
             last_decision.latency_ms = total_ms
             last_decision.rationale = f"No tier met threshold; using last: {last_decision.rationale}"
+            set_routing_tags(last_decision, _tier_name_of(last_router))
             return last_decision
         return RoutingDecision(
             skill_name="", confidence=0.0,
@@ -391,8 +433,15 @@ def run_routed_turn(
     registry: SkillRegistry,
     memory_store: Any | None = None,
     trace_id: str | None = None,
+    agent_context: AgentContext | None = None,
 ) -> RoutedTurnResult:
-    """Route query -> select skill -> execute -> optionally persist."""
+    """Route query -> select skill -> execute -> optionally persist.
+
+    Pass ``agent_context`` to tag the trace with agent identity so ACP and
+    downstream dashboards can attribute the turn to its caller.
+    """
+    if agent_context is not None:
+        set_agent_tags(agent_context)
     context = RoutingContext(session_id=session_id, available_skills=registry.list_skills())
     decision = router.route(query, context)
     skill = registry.get(decision.skill_name)
@@ -407,6 +456,7 @@ def run_routed_turn(
             session_id=session_id, trace_id=trace_id,
         )
         result = skill.execute(skill_input)
+        set_skill_tags(result, skill.definition)
     if memory_store and hasattr(memory_store, "write_exchange"):
         out = result.output
         text = str(out.get("text", out)) if isinstance(out, dict) else str(out)

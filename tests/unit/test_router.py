@@ -154,3 +154,149 @@ def test_llm_router_parse_failure_returns_empty():
     decision = LLMRouter(fm).route("q", _ctx())
     assert decision.skill_name == ""
     assert decision.confidence == 0.0
+
+
+# --- Observability tag emission (Part A of ACP integration) ------------------
+# These tests verify that routers emit routing.* tags with the correct tier_name
+# so ACP / dashboards can pivot traffic by tier.
+
+from unittest.mock import patch  # noqa: E402
+
+
+def _captured_tier(mock) -> str:
+    """Return the tier_name passed to the last set_routing_tags call."""
+    assert mock.call_count >= 1
+    args, kwargs = mock.call_args
+    # set_routing_tags(decision, tier_name, *, rationale_max_chars=...)
+    return args[1] if len(args) >= 2 else kwargs.get("tier_name", "")
+
+
+@patch("framework.router.set_routing_tags")
+def test_rule_based_router_tags_with_rule_tier(mock_tags):
+    RuleBasedRouter(rules=[(r"\bfind\b", "search")]).route("find it", _ctx())
+    assert _captured_tier(mock_tags) == "rule"
+
+
+@patch("framework.router.set_routing_tags")
+def test_lexical_router_tags_with_lexical_tier(mock_tags):
+    LexicalRouter(min_confidence=0.1).route("retrieve documents", _ctx())
+    assert _captured_tier(mock_tags) == "lexical"
+
+
+@patch("framework.router.set_routing_tags")
+def test_embedding_router_tags_with_embedding_tier(mock_tags):
+    EmbeddingRouter(embedder=_FakeEmbedder(), min_confidence=0.5).route("retrieve stuff", _ctx())
+    assert _captured_tier(mock_tags) == "embedding"
+
+
+@patch("framework.router.set_routing_tags")
+def test_llm_router_tags_with_llm_tier(mock_tags):
+    fm = _FakeFm('{"skill_name":"search","confidence":0.9,"rationale":"r"}')
+    LLMRouter(fm).route("q", _ctx())
+    assert _captured_tier(mock_tags) == "llm"
+
+
+@patch("framework.router.set_routing_tags")
+def test_custom_tier_name_flows_into_tags(mock_tags):
+    # Callers can override the default tier_name — useful for A/B testing two
+    # variants of the same router class.
+    RuleBasedRouter(rules=[(r"\bfind\b", "search")], tier_name="rule-v2").route("find it", _ctx())
+    assert _captured_tier(mock_tags) == "rule-v2"
+
+
+@patch("framework.router.set_routing_tags")
+def test_composite_router_retags_with_winning_tier(mock_tags):
+    rule = RuleBasedRouter(rules=[(r"\bfind\b", "search")])
+    lex = LexicalRouter(min_confidence=0.1)
+    comp = CompositeRouter()
+    comp.add_tier(rule, min_confidence=0.9)
+    comp.add_tier(lex, min_confidence=0.3)
+
+    # Rule tier wins → last tag call should be for "rule" tier with
+    # composite-adjusted latency (the inner tier tagged first, then composite).
+    comp.route("find docs", _ctx())
+    # Rule tagged once (its own call) + Composite re-tagged once = 2 calls.
+    # The *final* tag call is the composite re-tag with tier_name="rule".
+    last_call_args, _ = mock_tags.call_args
+    assert last_call_args[1] == "rule"
+
+
+@patch("framework.router.set_routing_tags")
+def test_composite_router_retags_with_last_tier_on_fallback(mock_tags):
+    # No tier meets its threshold → composite falls back to last tier's decision
+    # and re-tags with that tier's name.
+    rule = RuleBasedRouter(rules=[], default_skill="generate")  # returns confidence=0.5
+    lex = LexicalRouter(min_confidence=0.99)  # will also fail high threshold
+    comp = CompositeRouter()
+    comp.add_tier(rule, min_confidence=0.9)
+    comp.add_tier(lex, min_confidence=0.9)
+
+    comp.route("asdf qwerty", _ctx())
+    # Final tag call should be the composite re-tag, with tier_name = last tier ("lexical").
+    last_call_args, _ = mock_tags.call_args
+    assert last_call_args[1] == "lexical"
+
+
+# --- run_routed_turn skill tagging -------------------------------------------
+
+def test_run_routed_turn_tags_skill_after_execution():
+    from framework.router import run_routed_turn
+    from framework.skill_registry import SkillDefinition, SkillInput, SkillResult, SkillRegistry
+
+    class _FakeSkill:
+        @property
+        def name(self) -> str:
+            return "generate"
+
+        @property
+        def definition(self) -> SkillDefinition:
+            return SkillDefinition(name="generate", description="d", version="1.0", source="local")
+
+        def execute(self, _: SkillInput) -> SkillResult:
+            return SkillResult(output={"text": "ok"}, latency_ms=5, skill_name="generate")
+
+        def health(self):
+            return True, "ok"
+
+    registry = SkillRegistry()
+    registry.register(_FakeSkill())
+    rule = RuleBasedRouter(rules=[(r".*", "generate")])
+
+    with patch("framework.router.set_skill_tags") as mock_tags:
+        run_routed_turn("q", session_id="s1", router=rule, registry=registry)
+        assert mock_tags.call_count == 1
+        args, _ = mock_tags.call_args
+        result, definition = args
+        assert result.skill_name == "generate"
+        assert definition.source == "local"
+
+
+def test_run_routed_turn_sets_agent_tags_when_context_provided():
+    from framework.mlflow_tracing_utils import AgentContext
+    from framework.router import run_routed_turn
+    from framework.skill_registry import SkillDefinition, SkillInput, SkillResult, SkillRegistry
+
+    class _FakeSkill:
+        @property
+        def name(self):
+            return "generate"
+
+        @property
+        def definition(self):
+            return SkillDefinition(name="generate", description="d", source="local")
+
+        def execute(self, _):
+            return SkillResult(output={}, latency_ms=1, skill_name="generate")
+
+        def health(self):
+            return True, "ok"
+
+    registry = SkillRegistry()
+    registry.register(_FakeSkill())
+    rule = RuleBasedRouter(rules=[(r".*", "generate")])
+    ctx = AgentContext(id="a", origin="external", framework="langgraph")
+
+    with patch("framework.router.set_agent_tags") as mock_agent:
+        run_routed_turn("q", session_id="s", router=rule, registry=registry, agent_context=ctx)
+        assert mock_agent.call_count == 1
+        assert mock_agent.call_args[0][0] == ctx
